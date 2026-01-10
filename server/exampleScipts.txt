@@ -1,0 +1,24 @@
+#include <iostream>
+#include <cpr/cpr.h>
+#include <nlohmann/json.hpp>
+
+using namespace std;
+
+using json = nlohmann::json;
+
+int main() {
+    json requestBody = {
+        {"boardSize", 24}
+    };
+
+    cpr::Response r = cpr::Post(
+        cpr::Url{"https://naprock-server.vercel.app/getBoard"},
+        cpr::Body{requestBody.dump()},
+        cpr::Header{{"Content-Type", "application/json"}}
+    );
+
+    json responseData = json::parse(r.text);
+    cout << responseData["board"].dump(2) << endl;
+
+    return 0;
+}
