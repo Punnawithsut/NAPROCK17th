@@ -31,17 +31,19 @@ int count_adjacent_pairs(const vector<vector<int>> &grid)
     return count;
 }
 
-vector<vector<int>> rotate_submatrix(const vector<vector<int>> &grid, int k, int i, int j)
-{
-    vector<vector<int>> new_grid = grid;
+vector<vector<int>> rotate_submatrix(vector<vector<int>> grid, int k, int i, int j) {
+
+    vector<vector<int>> temp(k, vector<int>(k));
+
     for (int x = 0; x < k; ++x)
-    {
         for (int y = 0; y < k; ++y)
-        {
-            new_grid[i + y][j + k - 1 - x] = grid[i + x][j + y];
-        }
-    }
-    return new_grid;
+            temp[y][k - 1 - x] = grid[i + x][j + y];
+
+    for (int x = 0; x < k; ++x)
+        for (int y = 0; y < k; ++y)
+            grid[i + x][j + y] = temp[x][y];
+    return grid;
+
 }
 
 void print_grid(const vector<vector<int>> &grid)
@@ -178,7 +180,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
                                                       int pr1, int pc1, int pr2, int pc2,
                                                       int target_r, int target_c, bool is_vertical)
 {
-    const int beam_width = 10;
+    const int beam_width = 20;
     const int max_depth = 5;
     int N = initial_grid.size();
     unordered_set<string> visited;
@@ -259,7 +261,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
 
 pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid, int row1, int col1, int row2, int col2)
 {
-    const int beam_width = 10;
+    const int beam_width = 20;
     const int max_depth = 10;
     int N = initial_grid.size();
     unordered_set<string> visited;
