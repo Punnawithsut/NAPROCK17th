@@ -1,3 +1,0 @@
-C:/Personal/Projects/NAPROCK/NAPROCK17th/build/CMakeFiles/app.dir
-C:/Personal/Projects/NAPROCK/NAPROCK17th/build/CMakeFiles/ALL_BUILD.dir
-C:/Personal/Projects/NAPROCK/NAPROCK17th/build/CMakeFiles/ZERO_CHECK.dir
