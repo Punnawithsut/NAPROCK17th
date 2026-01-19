@@ -24,7 +24,7 @@ int main() {
 }
 
 
-Also get these path C:\Users\Punnawith Sutisukon\vcpkg\scripts\buildsystems\vcpkg.cmake
+Also get tool chain path C:\Users\Punnawith Sutisukon\vcpkg\scripts\buildsystems\vcpkg.cmake
 
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
 cmake --build build --config Release
