@@ -1,11 +1,23 @@
 #include <bits/stdc++.h>
-#include <iomanip>
-#include <iostream>
+#include <fstream>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
 using namespace std;
 using json = nlohmann::json;
+
+struct Rotation
+{
+    int k, i, j;
+    Rotation(int k, int i, int j) : k(k), i(i), j(j) {}
+};
+
+vector<vector<int>> locked;
+int n;
+int cnt = 0;
+int side = 0;
+bool quit = false;
+bool broke = false;
 
 vector<vector<int>> get_random_board(int n) {
     json requestBody = {
@@ -22,19 +34,31 @@ vector<vector<int>> get_random_board(int n) {
     return responseData["board"];
 }
 
+void save_file(vector<vector<int>> &og, vector<Rotation> &fp) {
+    const string SAVE_PATH = "result.json";
+    json result_file;
+    result_file["initialBoard"] = og;
+    json rotations_map = json::object();
 
-struct Rotation
-{
-    int k, i, j;
-    Rotation(int k, int i, int j) : k(k), i(i), j(j) {}
-};
-
-vector<vector<int>> locked;
-int n;
-int cnt = 0;
-int side = 0;
-bool quit = false;
-bool broke = false;
+    for(int k = 0; k < fp.size(); k++) {
+        string rotation_key = to_string(k + 1); 
+        rotations_map[rotation_key] = {
+            {"k", fp[k].k},
+            {"i", fp[k].i},
+            {"j", fp[k].j}
+        };
+    }
+    
+    result_file["rotation"] = rotations_map;
+    ofstream file(SAVE_PATH);
+    if(file.is_open()) {
+        file << result_file.dump(4);
+        file.close();
+        cout << "Saved successfully" << endl;
+    } else {
+        cout << "Couldn't open file, save file failed" << endl;
+    }
+}
 
 int count_adjacent_pairs(const vector<vector<int>> &grid)
 {
@@ -605,6 +629,7 @@ int main()
     print_grid(init_grid);
     cout << "-----------------           After           -------------------\n";
     init_grid = apply_rotations(init_grid, full_path);
+    save_file(init_grid, full_path);
     print_grid(init_grid);
     cout << "\n ops: " << full_path.size();
 
