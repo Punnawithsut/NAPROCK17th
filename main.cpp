@@ -225,7 +225,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
                                                       int pr1, int pc1, int pr2, int pc2,
                                                       int target_r, int target_c, bool is_vertical)
 {
-    const int beam_width = 20;
+    const int beam_width = 15;
     const int max_depth = 5;
     int N = initial_grid.size();
     unordered_set<string> visited;
@@ -306,7 +306,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
 
 pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid, int row1, int col1, int row2, int col2)
 {
-    const int beam_width = 20;
+    const int beam_width = 15;
     const int max_depth = 10;
     int N = initial_grid.size();
     unordered_set<string> visited;
@@ -627,9 +627,9 @@ int main()
 
     cout << "-----------------           Before          -------------------\n";
     print_grid(init_grid);
+    save_file(init_grid, full_path);
     cout << "-----------------           After           -------------------\n";
     init_grid = apply_rotations(init_grid, full_path);
-    save_file(init_grid, full_path);
     print_grid(init_grid);
     cout << "\n ops: " << full_path.size();
 

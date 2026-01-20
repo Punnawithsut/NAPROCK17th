@@ -14,7 +14,7 @@ endif()
 find_package(cpr CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_executable(app Frame_Strategy.cpp)
+add_executable(app main.cpp)
 
 target_include_directories(app PRIVATE .)
 target_link_libraries(app PRIVATE cpr::cpr nlohmann_json::nlohmann_json)
