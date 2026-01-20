@@ -382,11 +382,11 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
     int min_ops = 999;
     vector<Rotation> partial_result;
     
-    //auto free_pairs = find_free_pairs(grid);
-    //cout << "Found " << free_pairs.size() << " free pairs. ";
-    //
-    //for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    //{
+    // auto free_pairs = find_free_pairs(grid);
+    // cout << "Found " << free_pairs.size() << " free pairs. ";
+    
+    // for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+    // {
     //    auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
     //    if (move_result.first < min_ops)
     //    {
@@ -394,7 +394,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
     //        min_ops = move_result.first;
     //        cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
     //    }
-    //}
+    // }
     
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
@@ -424,6 +424,25 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
         {
             partial_result = temp_d.second;
             partial_result.emplace_back(step - row + 1, row, j);
+            min_ops = temp_d.first + 1;
+        }
+    }
+    
+    for (int step = j + 1; step < row; step++) 
+    {
+        temp_d = search_pair(grid, row + 1, step, row + 1, step + 1);
+        if (temp_d.first + 1 < min_ops)
+        {
+            partial_result = temp_d.second;
+            partial_result.emplace_back(step - j + 2, row - step + j, j);
+            min_ops = temp_d.first + 1;
+        }
+
+        temp_d = search_pair(grid, row + 1, step + 1, row + 1, step);
+        if (temp_d.first + 1 < min_ops)
+        {
+            partial_result = temp_d.second;
+            partial_result.emplace_back(step - j + 2, row - step + j, j);
             min_ops = temp_d.first + 1;
         }
     }
