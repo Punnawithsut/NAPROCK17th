@@ -13,12 +13,14 @@ This project demonstrates how to make HTTP POST requests using the `cpr` library
 * **Visual Studio 2022** (with "Desktop development with C++" workload).
 * **Git** installed.
 * **vcpkg** installed. (Set the system environment to vcpkg.exe)
+* **CMake** installed.
 
 ### macOS
 
 * **Xcode Command Line Tools**: Install via `xcode-select --install`.
 * **Homebrew**: (Optional, but recommended for installing CMake).
 * **vcpkg** installed (usually in `~/vcpkg`).
+* * **CMake** installed.
 
 ---
 
