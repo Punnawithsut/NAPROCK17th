@@ -30,7 +30,6 @@ function App() {
         const response = await fetch("/result.json");
         const json: any = await response.json();
         
-        // Convert rotation object to array
         const rotationsArray: Rotation[] = [];
         if (json.rotation) {
           const keys = Object.keys(json.rotation).map(Number).sort((a, b) => a - b);
