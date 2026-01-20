@@ -228,9 +228,9 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
     const int beam_width = 20;
     const int max_depth = 5;
     int N = initial_grid.size();
-    unordered_set<string> visited;
+    //unordered_set<string> visited;
     vector<State> current_beam = {{initial_grid, {}, {pr1, pc1}}};
-    visited.insert(serialize(initial_grid));
+    //visited.insert(serialize(initial_grid));
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
@@ -272,13 +272,13 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
                         vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
                         string ser = serialize(new_grid);
 
-                        if (visited.find(ser) == visited.end())
-                        {
-                            visited.insert(ser);
-                            vector<Rotation> new_path = cur.path;
-                            new_path.emplace_back(k, r, c);
-                            next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
-                        }
+                        //if (visited.find(ser) == visited.end())
+                        //{
+                        //visited.insert(ser);
+                        vector<Rotation> new_path = cur.path;
+                        new_path.emplace_back(k, r, c);
+                        next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
+                        //}
                     }
                 }
             }
@@ -309,7 +309,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid,
     const int beam_width = 20;
     const int max_depth = 10;
     int N = initial_grid.size();
-    unordered_set<string> visited;
+    //unordered_set<string> visited;
 
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
     if (current_beam[0].pos.first == -1)
@@ -318,7 +318,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid,
         broke = true;
         return {1000, {}};
     }
-    visited.insert(serialize(initial_grid));
+    //visited.insert(serialize(initial_grid));
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
@@ -345,13 +345,13 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid,
                         vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
                         string ser = serialize(new_grid);
 
-                        if (visited.find(ser) == visited.end())
-                        {
-                            visited.insert(ser);
-                            vector<Rotation> new_path = cur.path;
-                            new_path.emplace_back(k, r, c);
-                            next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
-                        }
+                        //if (visited.find(ser) == visited.end())
+                        // {
+                        //    visited.insert(ser);
+                        vector<Rotation> new_path = cur.path;
+                        new_path.emplace_back(k, r, c);
+                        next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
+                        //}
                     }
                 }
             }
@@ -382,19 +382,19 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
     int min_ops = 999;
     vector<Rotation> partial_result;
     
-    auto free_pairs = find_free_pairs(grid);
-    cout << "Found " << free_pairs.size() << " free pairs. ";
-    
-    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    {
-        auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
-        if (move_result.first < min_ops)
-        {
-            partial_result = move_result.second;
-            min_ops = move_result.first;
-            cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
-        }
-    }
+    //auto free_pairs = find_free_pairs(grid);
+    //cout << "Found " << free_pairs.size() << " free pairs. ";
+    //
+    //for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+    //{
+    //    auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
+    //    if (move_result.first < min_ops)
+    //    {
+    //        partial_result = move_result.second;
+    //        min_ops = move_result.first;
+    //        cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
+    //    }
+    //}
     
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
@@ -434,21 +434,21 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
 pair<int, vector<Rotation>> Horizontal_place(vector<vector<int>> grid, int Fsize, int j)
 {
     int row = Fsize / 2 - 2;
+    int min_ops = 999;
     vector<Rotation> partial_result;
     
-    auto free_pairs = find_free_pairs(grid);
-    int min_ops = 999;
-    
-    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    {
-        auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, false);
-        if (move_result.first < min_ops)
-        {
-            partial_result = move_result.second;
-            min_ops = move_result.first;
-            cout << "Using free pair for horizontal with cost " << min_ops << ". ";
-        }
-    }
+    //auto free_pairs = find_free_pairs(grid);
+    //
+    //for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+    //{
+    //    auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, false);
+    //    if (move_result.first < min_ops)
+    //    {
+    //        partial_result = move_result.second;
+    //        min_ops = move_result.first;
+    //        cout << "Using free pair for horizontal with cost " << min_ops << ". ";
+    //    }
+    //}
     
     auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
     if (ops1 < min_ops)
@@ -627,9 +627,9 @@ int main()
 
     cout << "-----------------           Before          -------------------\n";
     print_grid(init_grid);
+    save_file(init_grid, full_path);
     cout << "-----------------           After           -------------------\n";
     init_grid = apply_rotations(init_grid, full_path);
-    save_file(init_grid, full_path);
     print_grid(init_grid);
     cout << "\n ops: " << full_path.size();
 
