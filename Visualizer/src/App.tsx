@@ -179,7 +179,7 @@ function App() {
               const isPaired = isHorizontalPair || isVerticalPair;
               
               let isInRotation = false;
-              if (currentStep >= 0 && data && currentStep <= data.rotations.length) {
+              if (currentStep >= 0 && data && currentStep < data.rotations.length) {
                 const rotation = data.rotations[currentStep];
                 isInRotation = i >= rotation.i && i < rotation.i + rotation.k &&
                                j >= rotation.j && j < rotation.j + rotation.k;
