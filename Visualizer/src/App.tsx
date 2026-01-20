@@ -65,7 +65,7 @@ function App() {
             return prev;
           }
         });
-      }, 500)
+      }, 200)
     }
     return () => { clearInterval(timer) };
   }, [state, data])
