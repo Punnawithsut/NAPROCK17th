@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
+#include <omp.h>
 
 using namespace std;
 using json = nlohmann::json;
@@ -228,13 +229,12 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
     const int beam_width = 20;
     const int max_depth = 5;
     int N = initial_grid.size();
-    //unordered_set<string> visited;
     vector<State> current_beam = {{initial_grid, {}, {pr1, pc1}}};
-    //visited.insert(serialize(initial_grid));
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
         vector<State> next_beam;
+        
         for (const auto &cur : current_beam)
         {
             bool at_target = false;
@@ -253,34 +253,45 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
             {
                 return {static_cast<int>(cur.path.size()), cur.path};
             }
+        }
+        
+        #pragma omp parallel
+        {
+            vector<State> local_beam;
             
-            for (int k = 2; k <= N - 1; ++k)
+            #pragma omp for collapse(3) schedule(dynamic)
+            for (int beam_idx = 0; beam_idx < current_beam.size(); ++beam_idx)
             {
-                for (int r = 0; r <= N - k; ++r)
+                for (int k = 2; k <= N - 1; ++k)
                 {
-                    for (int c = 0; c <= N - k; ++c)
+                    for (int r = 0; r <= N - k; ++r)
                     {
-                        if (!Check_Valid(r + cnt, c + cnt, k - 1))
-                            continue;
-                        
-                        bool affects = false;
-                        if (r <= pr1 && pr1 < r + k && c <= pc1 && pc1 < c + k) affects = true;
-                        if (r <= pr2 && pr2 < r + k && c <= pc2 && pc2 < c + k) affects = true;
-                        if (r <= target_r && target_r < r + k && c <= target_c && target_c < c + k) affects = true;
-                        if (!affects) continue;
-                        
-                        vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                        string ser = serialize(new_grid);
-
-                        //if (visited.find(ser) == visited.end())
-                        //{
-                        //visited.insert(ser);
-                        vector<Rotation> new_path = cur.path;
-                        new_path.emplace_back(k, r, c);
-                        next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
-                        //}
+                        for (int c = 0; c <= N - k; ++c)
+                        {
+                            if (!Check_Valid(r + cnt, c + cnt, k - 1))
+                                continue;
+                            
+                            const auto &cur = current_beam[beam_idx];
+                            
+                            bool affects = false;
+                            if (r <= pr1 && pr1 < r + k && c <= pc1 && pc1 < c + k) affects = true;
+                            if (r <= pr2 && pr2 < r + k && c <= pc2 && pc2 < c + k) affects = true;
+                            if (r <= target_r && target_r < r + k && c <= target_c && target_c < c + k) affects = true;
+                            if (!affects) continue;
+                            
+                            vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
+                            
+                            vector<Rotation> new_path = cur.path;
+                            new_path.emplace_back(k, r, c);
+                            local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
+                        }
                     }
                 }
+            }
+            
+            #pragma omp critical
+            {
+                next_beam.insert(next_beam.end(), local_beam.begin(), local_beam.end());
             }
         }
         
@@ -309,7 +320,6 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid,
     const int beam_width = 20;
     const int max_depth = 10;
     int N = initial_grid.size();
-    //unordered_set<string> visited;
 
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
     if (current_beam[0].pos.first == -1)
@@ -318,42 +328,56 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid,
         broke = true;
         return {1000, {}};
     }
-    //visited.insert(serialize(initial_grid));
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
         vector<State> next_beam;
+        
         for (const auto &cur : current_beam)
         {
             if (cur.grid[row1][col1] == cur.grid[row2][col2])
             {
                 return {static_cast<int>(cur.path.size()), cur.path};
             }
-            for (int k = min(max(abs(cur.pos.first - row2), abs(cur.pos.second - col2)) + 2, 24); k >= 2; --k)
+        }
+        
+        #pragma omp parallel
+        {
+            vector<State> local_beam;
+            
+            #pragma omp for collapse(3) schedule(dynamic)
+            for (int beam_idx = 0; beam_idx < current_beam.size(); ++beam_idx)
             {
-                for (int r = 0; r <= N - k; ++r)
+                for (int k = min(max(abs(current_beam[beam_idx].pos.first - row2), 
+                                     abs(current_beam[beam_idx].pos.second - col2)) + 2, 24); k >= 2; --k)
                 {
-                    for (int c = 0; c <= N - k; ++c)
+                    for (int r = 0; r <= N - k; ++r)
                     {
-                        if ((r <= row1 && row1 < r + k && c <= col1 && col1 < c + k) || !Check_Valid(r + cnt, c + cnt, k - 1))
-                            continue;
-                        
-                        bool affects = (r <= row2 && row2 < r + k && c <= col2 && col2 < c + k);
-                        if (!affects)
-                            continue;
+                        for (int c = 0; c <= N - k; ++c)
+                        {
+                            const auto &cur = current_beam[beam_idx];
                             
-                        vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                        string ser = serialize(new_grid);
-
-                        //if (visited.find(ser) == visited.end())
-                        // {
-                        //    visited.insert(ser);
-                        vector<Rotation> new_path = cur.path;
-                        new_path.emplace_back(k, r, c);
-                        next_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
-                        //}
+                            if ((r <= row1 && row1 < r + k && c <= col1 && col1 < c + k) || 
+                                !Check_Valid(r + cnt, c + cnt, k - 1))
+                                continue;
+                            
+                            bool affects = (r <= row2 && row2 < r + k && c <= col2 && col2 < c + k);
+                            if (!affects)
+                                continue;
+                                
+                            vector<vector<int>> new_grid = rotate_submatrix(cur.grid, k, r, c);
+                            
+                            vector<Rotation> new_path = cur.path;
+                            new_path.emplace_back(k, r, c);
+                            local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
+                        }
                     }
                 }
+            }
+            
+            #pragma omp critical
+            {
+                next_beam.insert(next_beam.end(), local_beam.begin(), local_beam.end());
             }
         }
 
@@ -381,20 +405,6 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
     int row = Fsize / 2 - 2;
     int min_ops = 999;
     vector<Rotation> partial_result;
-    
-    //auto free_pairs = find_free_pairs(grid);
-    //cout << "Found " << free_pairs.size() << " free pairs. ";
-    //
-    //for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    //{
-    //    auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
-    //    if (move_result.first < min_ops)
-    //    {
-    //        partial_result = move_result.second;
-    //        min_ops = move_result.first;
-    //        cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
-    //    }
-    //}
     
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
@@ -436,19 +446,6 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<int>> grid, int Fsize
     int row = Fsize / 2 - 2;
     int min_ops = 999;
     vector<Rotation> partial_result;
-    
-    //auto free_pairs = find_free_pairs(grid);
-    //
-    //for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    //{
-    //    auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, false);
-    //    if (move_result.first < min_ops)
-    //    {
-    //        partial_result = move_result.second;
-    //        min_ops = move_result.first;
-    //        cout << "Using free pair for horizontal with cost " << min_ops << ". ";
-    //    }
-    //}
     
     auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
     if (ops1 < min_ops)
@@ -541,6 +538,9 @@ pair<vector<vector<int>>, vector<Rotation>> STEP_Do(int Fsize, vector<vector<int
 
 int main()
 {
+    omp_set_num_threads(omp_get_max_threads());
+    cout << "Using " << omp_get_max_threads() << " threads\n";
+
     //vector<vector<int>> init_grid = {
     //    {33, 78, 266, 95, 82, 52, 20, 242, 203, 19, 81, 200, 5, 120, 47, 102, 220, 184, 190, 272, 283, 134, 114, 183},
     //    {218, 265, 73, 83, 133, 205, 110, 146, 223, 184, 29, 48, 103, 160, 231, 39, 122, 60, 264, 57, 24, 24, 107, 12},
