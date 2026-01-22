@@ -125,39 +125,6 @@ bool Check_Valid(int i, int j, int k)
     return true;
 }
 
-bool show_prompt(vector<vector<int>> grid)
-{
-    int choice = 0;
-    bool check = false;
-    while (choice != 4)
-    {
-        cout << "\n1: Show grid | 2: Show locked | 3: count adjacent pair | 4: continune | 5: quit\n> ";
-        cin >> choice;
-        switch (choice)
-        {
-        case 1:
-            print_grid(grid);
-            break;
-        case 2:
-            print_grid(locked);
-            break;
-        case 3:
-            cout << "Adjacent pairs: " << count_adjacent_pairs(grid) << endl;
-            break;
-        case 4:
-            break;
-        case 5:
-            check = true;
-            break;
-        default:
-            cout << "Invalid choice\n";
-        }
-        if (check)
-            break;
-    }
-    return check;
-}
-
 string serialize(const vector<vector<int>> &g)
 {
     string s;
@@ -226,8 +193,9 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
                                                       int pr1, int pc1, int pr2, int pc2,
                                                       int target_r, int target_c, bool is_vertical)
 {
-    const int beam_width = 20;
-    const int max_depth = 5;
+    //TODO: If pair is horizontally placed then find adjacent (only up and down) pair and move it together
+    const int beam_width = 40;
+    const int max_depth = 2;
     int N = initial_grid.size();
     vector<State> current_beam = {{initial_grid, {}, {pr1, pc1}}};
 
@@ -317,8 +285,8 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<int>> &
 
 pair<int, vector<Rotation>> search_pair(const vector<vector<int>> &initial_grid, int row1, int col1, int row2, int col2)
 {
-    const int beam_width = 20;
-    const int max_depth = 10;
+    const int beam_width = 80 + cnt*5;
+    const int max_depth = 5;
     int N = initial_grid.size();
 
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
@@ -406,6 +374,20 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
     int min_ops = 999;
     vector<Rotation> partial_result;
     
+    auto free_pairs = find_free_pairs(grid);
+    cout << "Found " << free_pairs.size() << " free pairs. ";
+    
+    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+    {
+       auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
+       if (move_result.first < min_ops)
+       {
+           partial_result = move_result.second;
+           min_ops = move_result.first;
+           cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
+       }
+    }
+    
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
     {
@@ -419,7 +401,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
         min_ops = temp_d.first;
     }
 
-    for (int step = row + 1; step < Fsize - 2; step++)
+    for (int step = row + 1; step < Fsize - 2 - (j == Fsize / 2 - 1); step++) 
     {
         temp_d = search_pair(grid, step, j, step, j + 1);
         if (temp_d.first + 1 < min_ops)
@@ -434,6 +416,25 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<int>> grid, int Fsize, 
         {
             partial_result = temp_d.second;
             partial_result.emplace_back(step - row + 1, row, j);
+            min_ops = temp_d.first + 1;
+        }
+    }
+
+    for (int step = j + 1; step < row + j-1; step++) 
+    {
+        temp_d = search_pair(grid, row + 1, step, row + 1, step + 1);
+        if (temp_d.first + 1 < min_ops)
+        {
+            partial_result = temp_d.second;
+            partial_result.emplace_back(step - j + 2, row - step + j, j);
+            min_ops = temp_d.first + 1;
+        }
+
+        temp_d = search_pair(grid, row + 1, step + 1, row + 1, step);
+        if (temp_d.first + 1 < min_ops)
+        {
+            partial_result = temp_d.second;
+            partial_result.emplace_back(step - j + 2, row - step + j, j);
             min_ops = temp_d.first + 1;
         }
     }
@@ -496,6 +497,7 @@ pair<vector<vector<int>>, vector<Rotation>> STEP_Do(int Fsize, vector<vector<int
         locked[cnt + row + 1][cnt + j - 1] = 0;
 
         pair<int, vector<Rotation>> H_result = {999,{}};
+        //pair<int, vector<Rotation>> H_result = Horizontal_place(result[j - 2].first, Fsize, j - 2);
         int H_ops = dp[j - 2] + H_result.first;
         locked[cnt + row][cnt + j - 2] = 1;
         locked[cnt + row + 1][cnt + j - 2] = 1;
