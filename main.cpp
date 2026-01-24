@@ -228,14 +228,14 @@ pair<int, int> find_pos(const vector<vector<uint16_t>> &grid, int row, int col)
     return make_pair(-1, -1);
 }
 
-vector<tuple<int, int, int, int, uint16_t>> find_free_pairs(const vector<vector<uint16_t>> &grid)
+vector<tuple<int, int, int, int, uint16_t>> find_free_pairs(const vector<vector<uint16_t>> &grid,int track)
 {
     vector<tuple<int, int, int, int, uint16_t>> pairs;
     int N = grid.size();
     
     for (int i = 0; i < N; ++i)
     {
-        for (int j = 0; j < N; ++j)
+        for (int j = track; j < N; ++j)
         {
             if (locked[cnt + i][cnt + j]) continue;
             
@@ -437,20 +437,6 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     int min_ops = 999;
     vector<Rotation> partial_result;
     
-    auto free_pairs = find_free_pairs(grid);
-    cout << "Found " << free_pairs.size() << " free pairs. ";
-    
-    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
-    {
-       auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
-       if (move_result.first < min_ops)
-       {
-           partial_result = move_result.second;
-           min_ops = move_result.first;
-           cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
-       }
-    }
-    
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
     {
@@ -463,7 +449,26 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
         partial_result = temp_d.second;
         min_ops = temp_d.first;
     }
+    if(min_ops <= 1 )
+        return { min_ops, partial_result };
 
+    auto free_pairs = find_free_pairs(grid,j);
+    cout << "Found " << free_pairs.size() << " free pairs. ";
+    
+    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+    {
+       auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
+       if (move_result.first < min_ops)
+       {
+           partial_result = move_result.second;
+           min_ops = move_result.first;
+           cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
+       }
+    }
+
+    if (min_ops <= 1)
+        return {min_ops, partial_result};
+        
     for (int step = row + 1; step < Fsize - 2 - (j == Fsize / 2 - 1); step++) 
     {
         temp_d = search_pair(grid, step, j, step, j + 1);
