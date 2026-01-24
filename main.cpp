@@ -20,61 +20,68 @@ int side = 0;
 bool quit = false;
 bool broke = false;
 
-vector<vector<uint16_t>> get_random_board(int n) {
+vector<vector<uint16_t>> get_random_board(int n)
+{
     json requestBody = {
-        {"boardSize", n}
-    };
+        {"boardSize", n}};
 
     cpr::Response r = cpr::Post(
         cpr::Url{"https://naprock-server.vercel.app/getBoard"},
         cpr::Body{requestBody.dump()},
-        cpr::Header{{"Content-Type", "application/json"}}
-    );
+        cpr::Header{{"Content-Type", "application/json"}});
 
     json responseData = json::parse(r.text);
     vector<vector<uint16_t>> board(n, vector<uint16_t>(n));
-    
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
+
+    for (int i = 0; i < n; ++i)
+    {
+        for (int j = 0; j < n; ++j)
+        {
             board[i][j] = static_cast<uint16_t>(responseData["board"][i][j].get<int>());
         }
     }
-    
+
     return board;
 }
 
-void save_file(vector<vector<uint16_t>> &og, vector<Rotation> &fp) {
+void save_file(vector<vector<uint16_t>> &og, vector<Rotation> &fp)
+{
     const string SAVE_PATH = "result.json";
     json result_file;
-    
+
     json board_json = json::array();
-    for (const auto &row : og) {
+    for (const auto &row : og)
+    {
         json row_json = json::array();
-        for (uint16_t val : row) {
+        for (uint16_t val : row)
+        {
             row_json.push_back(static_cast<int>(val));
         }
         board_json.push_back(row_json);
     }
-    
+
     result_file["initialBoard"] = board_json;
     json rotations_map = json::object();
 
-    for(int k = 0; k < fp.size(); k++) {
-        string rotation_key = to_string(k + 1); 
+    for (int k = 0; k < fp.size(); k++)
+    {
+        string rotation_key = to_string(k + 1);
         rotations_map[rotation_key] = {
             {"k", fp[k].k},
             {"i", fp[k].i},
-            {"j", fp[k].j}
-        };
+            {"j", fp[k].j}};
     }
-    
+
     result_file["rotation"] = rotations_map;
     ofstream file(SAVE_PATH);
-    if(file.is_open()) {
+    if (file.is_open())
+    {
         file << result_file.dump(4);
         file.close();
         cout << "Saved successfully" << endl;
-    } else {
+    }
+    else
+    {
         cout << "Couldn't open file, save file failed" << endl;
     }
 }
@@ -95,7 +102,8 @@ int count_adjacent_pairs(const vector<vector<uint16_t>> &grid)
     return count;
 }
 
-vector<vector<uint16_t>> rotate_submatrix(vector<vector<uint16_t>> grid, int k, int i, int j) {
+vector<vector<uint16_t>> rotate_submatrix(vector<vector<uint16_t>> grid, int k, int i, int j)
+{
 
     vector<vector<uint16_t>> temp(k, vector<uint16_t>(k));
 
@@ -107,7 +115,6 @@ vector<vector<uint16_t>> rotate_submatrix(vector<vector<uint16_t>> grid, int k, 
         for (int y = 0; y < k; ++y)
             grid[i + x][j + y] = temp[x][y];
     return grid;
-
 }
 
 void print_grid(const vector<vector<uint16_t>> &grid)
@@ -228,17 +235,18 @@ pair<int, int> find_pos(const vector<vector<uint16_t>> &grid, int row, int col)
     return make_pair(-1, -1);
 }
 
-vector<tuple<int, int, int, int, uint16_t>> find_free_pairs(const vector<vector<uint16_t>> &grid,int track)
+vector<tuple<int, int, int, int, uint16_t>> find_free_pairs(const vector<vector<uint16_t>> &grid, int track)
 {
     vector<tuple<int, int, int, int, uint16_t>> pairs;
     int N = grid.size();
-    
+
     for (int i = 0; i < N; ++i)
     {
         for (int j = track; j < N; ++j)
         {
-            if (locked[cnt + i][cnt + j]) continue;
-            
+            if (locked[cnt + i][cnt + j])
+                continue;
+
             if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && grid[i][j] == grid[i][j + 1])
             {
                 pairs.push_back({i, j, i, j + 1, grid[i][j]});
@@ -253,10 +261,10 @@ vector<tuple<int, int, int, int, uint16_t>> find_free_pairs(const vector<vector<
 }
 
 pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_t>> &initial_grid,
-                                                      int pr1, int pc1, int pr2, int pc2,
-                                                      int target_r, int target_c, bool is_vertical)
+                                                     int pr1, int pc1, int pr2, int pc2,
+                                                     int target_r, int target_c, bool is_vertical)
 {
-    //TODO: If pair is horizontally placed then find adjacent (only up and down) pair and move it together
+    // TODO: If pair is horizontally placed then find adjacent (only up and down) pair and move it together
     const int beam_width = 40;
     const int max_depth = 2;
     int N = initial_grid.size();
@@ -265,36 +273,36 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
     for (int depth = 0; depth < max_depth; ++depth)
     {
         vector<State> next_beam;
-        
+
         for (const auto &cur : current_beam)
         {
             bool at_target = false;
             if (is_vertical)
             {
                 at_target = (cur.grid[target_r][target_c] == cur.grid[target_r + 1][target_c] &&
-                            cur.grid[target_r][target_c] == initial_grid[pr1][pc1]);
+                             cur.grid[target_r][target_c] == initial_grid[pr1][pc1]);
             }
             else
             {
                 at_target = (cur.grid[target_r][target_c] == cur.grid[target_r][target_c + 1] &&
-                            cur.grid[target_r][target_c] == initial_grid[pr1][pc1]);
+                             cur.grid[target_r][target_c] == initial_grid[pr1][pc1]);
             }
-            
+
             if (at_target)
             {
                 return {static_cast<int>(cur.path.size()), cur.path};
             }
         }
-        
-        #pragma omp parallel
+
+#pragma omp parallel
         {
             vector<State> local_beam;
-            
-            #pragma omp for schedule(dynamic) nowait
+
+#pragma omp for schedule(dynamic) nowait
             for (int beam_idx = 0; beam_idx < current_beam.size(); ++beam_idx)
             {
                 const auto &cur = current_beam[beam_idx];
-                
+
                 for (int k = 2; k <= N - 1; ++k)
                 {
                     for (int r = 0; r <= N - k; ++r)
@@ -303,15 +311,19 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
                         {
                             if (!Check_Valid(r + cnt, c + cnt, k - 1))
                                 continue;
-                            
+
                             bool affects = false;
-                            if (r <= pr1 && pr1 < r + k && c <= pc1 && pc1 < c + k) affects = true;
-                            if (r <= pr2 && pr2 < r + k && c <= pc2 && pc2 < c + k) affects = true;
-                            if (r <= target_r && target_r < r + k && c <= target_c && target_c < c + k) affects = true;
-                            if (!affects) continue;
-                            
+                            if (r <= pr1 && pr1 < r + k && c <= pc1 && pc1 < c + k)
+                                affects = true;
+                            if (r <= pr2 && pr2 < r + k && c <= pc2 && pc2 < c + k)
+                                affects = true;
+                            if (r <= target_r && target_r < r + k && c <= target_c && target_c < c + k)
+                                affects = true;
+                            if (!affects)
+                                continue;
+
                             vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                            
+
                             vector<Rotation> new_path = cur.path;
                             new_path.emplace_back(k, r, c);
                             local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
@@ -319,13 +331,13 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
                     }
                 }
             }
-            
-            #pragma omp critical
+
+#pragma omp critical
             {
                 next_beam.insert(next_beam.end(), local_beam.begin(), local_beam.end());
             }
         }
-        
+
         sort(next_beam.begin(), next_beam.end(),
              [&](const State &a, const State &b)
              {
@@ -333,7 +345,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
                  int dist_b = abs(b.pos.first - target_r) + abs(b.pos.second - target_c) + 2 * b.path.size();
                  return dist_a < dist_b;
              });
-        
+
         if (next_beam.size() > static_cast<size_t>(beam_width))
         {
             next_beam.resize(beam_width);
@@ -342,13 +354,13 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
         if (current_beam.empty())
             break;
     }
-    
+
     return {999, {}};
 }
 
 pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1, int row2, int col2)
 {
-    const int beam_width = 80 + cnt*5;
+    const int beam_width = 80 + cnt * 5;
     const int max_depth = 5;
     int N = initial_grid.size();
 
@@ -363,7 +375,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
     for (int depth = 0; depth < max_depth; ++depth)
     {
         vector<State> next_beam;
-        
+
         for (const auto &cur : current_beam)
         {
             if (cur.grid[row1][col1] == cur.grid[row2][col2])
@@ -371,33 +383,36 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
                 return {static_cast<int>(cur.path.size()), cur.path};
             }
         }
-        
-        #pragma omp parallel
+
+#pragma omp parallel
         {
             vector<State> local_beam;
-            
-            #pragma omp for schedule(dynamic) nowait
+
+#pragma omp for schedule(dynamic) nowait
             for (int beam_idx = 0; beam_idx < current_beam.size(); ++beam_idx)
             {
                 const auto &cur = current_beam[beam_idx];
-                
-                for (int k = min(max(abs(cur.pos.first - row2), 
-                                     abs(cur.pos.second - col2)) + 2, 24); k >= 2; --k)
+
+                for (int k = min(max(abs(cur.pos.first - row2),
+                                     abs(cur.pos.second - col2)) +
+                                     2,
+                                 24);
+                     k >= 2; --k)
                 {
                     for (int r = 0; r <= N - k; ++r)
                     {
                         for (int c = 0; c <= N - k; ++c)
                         {
-                            if ((r <= row1 && row1 < r + k && c <= col1 && col1 < c + k) || 
+                            if ((r <= row1 && row1 < r + k && c <= col1 && col1 < c + k) ||
                                 !Check_Valid(r + cnt, c + cnt, k - 1))
                                 continue;
-                            
+
                             bool affects = (r <= row2 && row2 < r + k && c <= col2 && col2 < c + k);
                             if (!affects)
                                 continue;
-                                
+
                             vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                            
+
                             vector<Rotation> new_path = cur.path;
                             new_path.emplace_back(k, r, c);
                             local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
@@ -405,8 +420,8 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
                     }
                 }
             }
-            
-            #pragma omp critical
+
+#pragma omp critical
             {
                 next_beam.insert(next_beam.end(), local_beam.begin(), local_beam.end());
             }
@@ -436,7 +451,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     int row = Fsize / 2 - 2;
     int min_ops = 999;
     vector<Rotation> partial_result;
-    
+
     pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
     if (temp_d.first < min_ops)
     {
@@ -449,27 +464,27 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
         partial_result = temp_d.second;
         min_ops = temp_d.first;
     }
-    if(min_ops <= 1 )
-        return { min_ops, partial_result };
+    if (min_ops <= 1)
+        return {min_ops, partial_result};
 
-    auto free_pairs = find_free_pairs(grid,j);
+    auto free_pairs = find_free_pairs(grid, j);
     cout << "Found " << free_pairs.size() << " free pairs. ";
-    
-    for (const auto& [pr1, pc1, pr2, pc2, val] : free_pairs)
+
+    for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs)
     {
-       auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
-       if (move_result.first < min_ops)
-       {
-           partial_result = move_result.second;
-           min_ops = move_result.first;
-           cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
-       }
+        auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
+        if (move_result.first < min_ops)
+        {
+            partial_result = move_result.second;
+            min_ops = move_result.first;
+            cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
+        }
     }
 
     if (min_ops <= 1)
         return {min_ops, partial_result};
-        
-    for (int step = row + 1; step < Fsize - 2 - (j == Fsize / 2 - 1); step++) 
+
+    for (int step = row + 1; step < Fsize - 2 - (j == Fsize / 2 - 1); step++)
     {
         temp_d = search_pair(grid, step, j, step, j + 1);
         if (temp_d.first + 1 < min_ops)
@@ -488,7 +503,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
         }
     }
 
-    for (int step = j + 1; step < row + j-1; step++) 
+    for (int step = j + 1; step < row + j - 1; step++)
     {
         temp_d = search_pair(grid, row + 1, step, row + 1, step + 1);
         if (temp_d.first + 1 < min_ops)
@@ -515,28 +530,29 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
     int row = Fsize / 2 - 2;
     int min_ops = 999;
     vector<Rotation> partial_result;
-    
+
     auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
     if (ops1 < min_ops)
     {
         partial_result = path1;
         min_ops = ops1;
     }
-    
+
     grid = apply_rotations(grid, partial_result);
     locked[cnt + row][cnt + j] = 1;
     locked[cnt + row][cnt + j + 1] = 1;
-    
+
     auto [ops2, path2] = search_pair(grid, row + 1, j, row + 1, j + 1);
     partial_result.insert(partial_result.end(), path2.begin(), path2.end());
-    
+
     locked[cnt + row][cnt + j] = 0;
     locked[cnt + row][cnt + j + 1] = 0;
-    
+
     return {min_ops + ops2, partial_result};
 }
 
-vector<vector<uint8_t>> rotate_submatrix_u8(vector<vector<uint8_t>> grid, int k, int i, int j) {
+vector<vector<uint8_t>> rotate_submatrix_u8(vector<vector<uint8_t>> grid, int k, int i, int j)
+{
     vector<vector<uint8_t>> temp(k, vector<uint8_t>(k));
 
     for (int x = 0; x < k; ++x)
@@ -577,7 +593,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
         locked[cnt + row][cnt + j - 1] = 0;
         locked[cnt + row + 1][cnt + j - 1] = 0;
 
-        pair<int, vector<Rotation>> H_result = {999,{}};
+        pair<int, vector<Rotation>> H_result = {999, {}};
         int H_ops = dp[j - 2] + H_result.first;
         locked[cnt + row][cnt + j - 2] = 1;
         locked[cnt + row + 1][cnt + j - 2] = 1;
