@@ -154,7 +154,7 @@ bool Check_Valid(int i, int j, int k)
 {
     if (locked[i][j] || locked[i + k][j + k] || locked[i][j + k] || locked[i + k][j])
         return false;
-    for (int ft = 2; ft < k; ft += 2)
+    for (int ft = 1; ft < k; ft +=1)
     {
         if (locked[i + ft][j] || locked[i][j + ft] || locked[i + ft][j + k] || locked[i + k][j + ft])
             return false;
@@ -532,11 +532,8 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
     vector<Rotation> partial_result;
 
     auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
-    if (ops1 < min_ops)
-    {
-        partial_result = path1;
-        min_ops = ops1;
-    }
+    partial_result = path1;
+    min_ops = ops1;
 
     grid = apply_rotations(grid, partial_result);
     locked[cnt + row][cnt + j] = 1;
@@ -547,7 +544,6 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
     locked[cnt + row][cnt + j] = 0;
     locked[cnt + row][cnt + j + 1] = 0;
-
     return {min_ops + ops2, partial_result};
 }
 
@@ -593,7 +589,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
         locked[cnt + row][cnt + j - 1] = 0;
         locked[cnt + row + 1][cnt + j - 1] = 0;
 
-        pair<int, vector<Rotation>> H_result = {999, {}};
+        pair<int, vector<Rotation>> H_result = Horizontal_place(result[j - 2].first, Fsize, j - 2);
         int H_ops = dp[j - 2] + H_result.first;
         locked[cnt + row][cnt + j - 2] = 1;
         locked[cnt + row + 1][cnt + j - 2] = 1;
@@ -612,7 +608,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
             {
                 result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
             }
-            cout << "2 (f)cost : " << H_result.first << '\n';
+            cout << "H (f)cost : " << H_result.first << '\n';
         }
         else
         {
@@ -623,7 +619,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
             {
                 result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
             }
-            cout << "1 (f)cost : " << V_result.first << '\n';
+            cout << "V (f)cost : " << V_result.first << '\n';
         }
     }
 
