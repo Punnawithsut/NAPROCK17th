@@ -163,39 +163,6 @@ bool Check_Valid(int i, int j, int k)
     return true;
 }
 
-bool show_prompt(vector<vector<uint16_t>> grid)
-{
-    int choice = 0;
-    bool check = false;
-    while (choice != 4)
-    {
-        cout << "\n1: Show grid | 2: Show locked | 3: count adjacent pair | 4: continune | 5: quit\n> ";
-        cin >> choice;
-        switch (choice)
-        {
-        case 1:
-            print_grid(grid);
-            break;
-        case 2:
-            print_grid(locked);
-            break;
-        case 3:
-            cout << "Adjacent pairs: " << count_adjacent_pairs(grid) << endl;
-            break;
-        case 4:
-            break;
-        case 5:
-            check = true;
-            break;
-        default:
-            cout << "Invalid choice\n";
-        }
-        if (check)
-            break;
-    }
-    return check;
-}
-
 string serialize(const vector<vector<uint16_t>> &g)
 {
     string s;
