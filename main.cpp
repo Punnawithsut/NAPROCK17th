@@ -155,7 +155,7 @@ bool Check_Valid(int i, int j, int k)
 {
     if (locked[i][j] || locked[i + k][j + k] || locked[i][j + k] || locked[i + k][j])
         return false;
-    for (int ft = 1; ft < k; ft +=1)
+    for (int ft = 1; ft < k; ft += 1)
     {
         if (locked[i + ft][j] || locked[i][j + ft] || locked[i + ft][j + k] || locked[i + k][j + ft])
             return false;
@@ -266,7 +266,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
                                                      int target_r, int target_c, bool is_vertical)
 {
     // TODO: If pair is horizontally placed then find adjacent (only up and down) pair and move it together
-    const int beam_width = 40;
+    const int beam_width = 30;
     const int max_depth = 2;
     int N = initial_grid.size();
     vector<State> current_beam = {{initial_grid, {}, {pr1, pc1}}};
@@ -361,7 +361,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
 
 pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1, int row2, int col2)
 {
-    const int beam_width = 80 + cnt * 5;
+    const int beam_width = 30 + cnt * 5;
     const int max_depth = 5;
     int N = initial_grid.size();
 
@@ -447,7 +447,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
     return {1000, {}};
 }
 
-pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fsize, int j,int i)
+pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fsize, int j, int i)
 {
     int row = Fsize / 2 - 2;
     int min_ops = 999;
@@ -468,11 +468,11 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     if (min_ops <= 1)
         return {min_ops, partial_result};
 
-    if(SET_FP)
+    if (SET_FP)
     {
         auto free_pairs = find_free_pairs(grid, j);
         cout << "V Found " << free_pairs.size() << " free pairs. ";
-    
+
         for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs)
         {
             auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, i, j, true);
@@ -488,9 +488,9 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     if (min_ops <= 1)
         return {min_ops, partial_result};
 
-    int up=0, down = (!locked[cnt + Fsize - 1][cnt + Fsize/2])*(2 + (j>=row-1)*(row-j-2) );
+    int up = 0, down = (!locked[cnt + Fsize - 1][cnt + Fsize / 2]) * (2 + (j >= row - 1) * (row - j - 2));
 
-    ///down
+    /// down
     for (int step = i + 1; step < Fsize - 2 + down; step++)
     {
         temp_d = search_pair(grid, step, j, step, j + 1);
@@ -512,8 +512,8 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     if (min_ops <= 1)
         return {min_ops, partial_result};
 
-    //up
-    for (int step = j + 1; step < i + j - 1+ up; step++)
+    // up
+    for (int step = j + 1; step < i + j - 1 + up; step++)
     {
         temp_d = search_pair(grid, i + 1, step, i + 1, step + 1);
         if (temp_d.first + 1 < min_ops)
@@ -539,12 +539,12 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 {
     int row = Fsize / 2 - 2;
     int min_ops = 999;
-    vector<Rotation> partial_result,temp_result;
+    vector<Rotation> partial_result, temp_result;
     auto free_pairs = find_free_pairs(grid, j);
     cout << "H Found " << free_pairs.size() << " free pairs. ";
     SET_FP = true;
 
-    //First 1
+    // First 1
     {
         int mn_free = 999;
         for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs)
@@ -558,11 +558,11 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         }
 
         auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
-        
+
         locked[cnt + row][cnt + j] = 1;
         locked[cnt + row][cnt + j + 1] = 1;
-        
-        if(ops1 > mn_free)
+
+        if (ops1 > mn_free)
         {
             ops1 = mn_free;
             path1 = temp_result;
@@ -571,19 +571,18 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row + 1, j, row + 1, j + 1);
         partial_result = path1;
         partial_result.insert(partial_result.end(), path2.begin(), path2.end());
-        
+
         locked[cnt + row][cnt + j] = 0;
         locked[cnt + row][cnt + j + 1] = 0;
         min_ops = ops1 + ops2;
     }
 
-    
     // First 2
     {
         int mn_free = 999;
         for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs)
         {
-            auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row+1, j, false);
+            auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row + 1, j, false);
             if (move_result.first < mn_free)
             {
                 temp_result = move_result.second;
@@ -593,8 +592,8 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
         auto [ops1, path1] = search_pair(grid, row + 1, j, row + 1, j + 1);
 
-        locked[cnt + row+1][cnt + j] = 1;
-        locked[cnt + row+1][cnt + j + 1] = 1;
+        locked[cnt + row + 1][cnt + j] = 1;
+        locked[cnt + row + 1][cnt + j + 1] = 1;
 
         if (ops1 > mn_free)
         {
@@ -603,14 +602,15 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         }
 
         auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row, j, row, j + 1);
-        if (ops1 + ops2 < min_ops){
+        if (ops1 + ops2 < min_ops)
+        {
             min_ops = ops1 + ops2;
             partial_result = path1;
             partial_result.insert(partial_result.end(), path2.begin(), path2.end());
         }
 
-        locked[cnt + row+1][cnt + j] = 0;
-        locked[cnt + row+1][cnt + j + 1] = 0;
+        locked[cnt + row + 1][cnt + j] = 0;
+        locked[cnt + row + 1][cnt + j + 1] = 0;
     }
 
     if (min_ops <= 2)
@@ -618,44 +618,24 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         return {min_ops, partial_result};
     }
 
-
-
     // Setting
     int up = 0, down = (!locked[cnt + Fsize - 1][cnt + Fsize / 2]) * (2 + (j >= row - 1) * (row - j - 2));
+
     // Down 1
-
     {
-        // for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs)
-        // {
-        //     auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row + 1, j, false);
-        //     if (move_result.first < mn_free)
-        //     {
-        //         temp_result = move_result.second;
-        //         mn_free = move_result.first;
-        //         cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << mn_free << ". ";
-        //     }
-        // }
-        //int mn_free = 999;
-
         SET_FP = false;
         for (int step = row + 1; step < Fsize - 3 + down; step++)
         {
 
-            auto [ops1, path1] = search_pair(grid, step , j, step + 1, j );
+            auto [ops1, path1] = search_pair(grid, step, j, step + 1, j);
             locked[cnt + step][cnt + j] = 1;
-            locked[cnt + step+1][cnt + j] = 1;
+            locked[cnt + step + 1][cnt + j] = 1;
 
-            // if (ops1 > mn_free)
-            // {
-            //     ops1 = mn_free;
-            //     path1 = temp_result;
-            // }
-
-            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j+1, step + 1, j+1);
+            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j + 1, step + 1, j + 1);
 
             if (ops1 + ops2 + 1 < min_ops)
             {
-                min_ops = ops1 + ops2+1;
+                min_ops = ops1 + ops2 + 1;
                 partial_result = path1;
                 partial_result.insert(partial_result.end(), path2.begin(), path2.end());
                 partial_result.emplace_back(step - row + 2, row, j);
@@ -665,15 +645,72 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             locked[cnt + step + 1][cnt + j] = 0;
         }
     }
-    
 
-    
+    // Down 2
+    {
+        SET_FP = false;
+        for (int step = row + 1; step < Fsize - 3 + down; step++)
+        {
 
-    //Down
+            auto [ops1, path1] = search_pair(grid, step, j + 1, step + 1, j + 1);
+            locked[cnt + step][cnt + j + 1] = 1;
+            locked[cnt + step + 1][cnt + j + 1] = 1;
+
+            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j, step + 1, j);
+
+            if (ops1 + ops2 + 1 < min_ops)
+            {
+                min_ops = ops1 + ops2 + 1;
+                partial_result = path1;
+                partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+                partial_result.emplace_back(step - row + 2, row, j);
+            }
+
+            locked[cnt + step][cnt + j + 1] = 0;
+            locked[cnt + step + 1][cnt + j + 1] = 0;
+        }
+    }
+
+    // Down 3
+    {
+        SET_FP = false;
+        for (int step = row + 1; step < Fsize - 3 + down; step++)
+        {
+
+            auto [ops1, path1] = search_pair(grid, step + 1, j, step + 1, j + 1);
+            locked[cnt + step + 1][cnt + j] = 1;
+            locked[cnt + step + 1][cnt + j + 1] = 1;
+
+            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j, step, j + 1);
+
+            if (ops1 + ops2 + 1 < min_ops)
+            {
+                min_ops = ops1 + ops2 + 1;
+                partial_result = path1;
+                partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+                partial_result.emplace_back(step - row + 2, row, j);
+            }
+
+            locked[cnt + step+1][cnt + j] = 0;
+            locked[cnt + step+1][cnt + j + 1] = 0;
+        }
+    }
+
+    // // Up 1
+    // for (int step = j + 1; step < row + j - 1 + up; step++)
+    // {
+    //     auto [ops1, path1] = search_pair(grid, row + 1, step, row + 1, step + 1);
+    //     // if (temp_d.first + 1 < min_ops)
+    //     // {
+    //     //     partial_result = temp_d.second;
+    //     //     partial_result.emplace_back(step - j + 2, i - step + j, j);
+    //     //     min_ops = temp_d.first + 1;
+    //     // }
+    // }
 
     SET_FP = true;
 
-    return {min_ops , partial_result};
+    return {min_ops, partial_result};
 }
 
 vector<vector<uint8_t>> rotate_submatrix_u8(vector<vector<uint8_t>> grid, int k, int i, int j)
@@ -697,7 +734,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
 
     vector<int> dp(half + 2, 0);
     vector<pair<vector<vector<uint16_t>>, vector<Rotation>>> result(half + 1, {grid, {}});
-    pair<int, vector<Rotation>> V_result = Vertical_place(result[mode].first, Fsize, mode,row);
+    pair<int, vector<Rotation>> V_result = Vertical_place(result[mode].first, Fsize, mode, row);
     int V_ops = dp[mode] + V_result.first;
     locked[cnt + row][cnt + mode] = 1;
     locked[cnt + row + 1][cnt + mode] = 1;
