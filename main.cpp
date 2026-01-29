@@ -514,10 +514,10 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     //     if (min_ops <= 2)
     //         return {min_ops, partial_result};
     // }
-
-    for (int i = row+7; i > row ; i--)
+    int err = 0;
+    for (int i = Fsize-3; i > row ; i--)
     {
-        for (int step = j + 7;step>=j;step--)
+        for (int step = Fsize/2 -5+j;step>=j;step--)
         {
             auto [ops1, path1] = search_pair(grid, i, step+1, i, step);
             if(ops1 != 1){
@@ -531,19 +531,21 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
             if(ops1 == 1)
             {
                 int k = i - row + step - j + 1, r = row - (step - j);
-                if (k > 12 || r < 0 || j + k >= Fsize)
-                    continue;
+                if (k > 12 || r < 0 || j + k >= Fsize){
+                    err++;
+                    cout<<'\n'<< k<<' '<< r <<' '<< j<<' ';
+                    continue;}
                 if (locked[r + cnt][j + cnt + k - 1] || locked[r + cnt + k - 1][j + cnt + k - 1])
                 {
-                    cout<<" ICE : "<<i<<' '<<step<<" CREAM ";
+                    err++;
                     continue;}
+                cout << " ERR: " << err << " ";
                 partial_result = path1;
                 partial_result.emplace_back(k, r, j);
                 return {2, partial_result};
             }
         }
     }
-
     return {min_ops, partial_result};
 }
 

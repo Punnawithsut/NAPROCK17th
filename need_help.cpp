@@ -245,7 +245,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
     if (current_beam[0].pos.first == -1)
     {
-        cout << row1 << ' ' << col1 << " Broke\n";
+        //cout << row1 << ' ' << col1 << " Broke\n";
         broke = true;
         return {1000, {}};
     }
@@ -573,10 +573,8 @@ pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>>
         vector<State> next_beam;
 
         for(const auto &cur : current_beam) {
-            bool at_target = false;
-            at_target = (target_r == tlr && target_c == tlc && 
-             target_r + 1 == brr && target_c + 1 == brc);
-            if(at_target) {
+            if (target_r == cur.pos.first && target_c == cur.pos.second)
+            {
                 return {static_cast<int>(cur.path.size()), cur.path};
             }
         }
@@ -600,14 +598,13 @@ pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>>
                             
                             bool affects = false;
                             auto [c_tlr, c_tlc] = cur.pos;
-                            if (c_tlr >= r  && c_tlc >= c && c_tlr < r + k && c_tlc < c + k) affects = true; //check if the extended pair is in the rotation or not
+                            if (c_tlr >= r  && c_tlc >= c && c_tlr+1 < r + k && c_tlc+1 < c + k) affects = true; //check if the extended pair is in the rotation or not
                             if (!affects) continue;
-                            
                             vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
                             
                             vector<Rotation> new_path = cur.path;
                             new_path.emplace_back(k, r, c);
-                            local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 1 - cur.pos.first}});
+                            local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 2 - cur.pos.first}});
                         }
                     }
                 }
@@ -948,12 +945,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
     SET_FP = true;
     if (SET_FP) {
-        auto free_pairs = find_free_pairs(grid, j);
-        cout << "H Found " << free_pairs.size() << " free pairs. ";
 
         for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs) {
-            bool is_upper = pr1 < (Fsize/2 - 2) && pr2 < (Fsize/2 - 2);
-            bool is_significant = !(locked[row + cnt][pc1] || locked[row + cnt][pc2] || locked[row + 1 + cnt][pc1] || locked[row + 1 + cnt][pc2]);
+            bool is_upper = max(pr1,pr2) < (Fsize/2 - 2);
+            bool is_significant = !(locked[row + cnt][cnt + pc1] || locked[row + cnt][cnt + pc2] || locked[row + 1 + cnt][cnt + pc1] || locked[row + 1 + cnt][cnt + pc2]);
             if(DEBUG) {
                 //cout << "Free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") is_significant: " << is_significant << endl;
             }
@@ -966,19 +961,19 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 bool tl = true, bl = true, tr = true, br = true;
                 ExtendedPair extend_result;
                 if(is_vertical_pair) {
-                    tl = (pr1 >= 1 && pc1 - 1 >= 0 && 
+                    tl = (pr1 >= 0 && pc1 - 1 >= 0 && 
                         !locked[pr1 + cnt][pc1 - 1 + cnt] && 
                         !locked[pr2 + cnt][pc1 - 1 + cnt]);
                 
-                    bl = (pr2 < Fsize - 1 && pc1 - 1 >= 0 && 
+                    bl = (pr2 < Fsize  && pc1 - 1 >= 0 && 
                         !locked[pr1 + cnt][pc1 - 1 + cnt] && 
                         !locked[pr2 + cnt][pc1 - 1 + cnt]);
                     
-                    tr = (pr1 >= 1 && pc1 + 1 < Fsize && 
+                    tr = (pr1 >= 0 && pc1 + 1 < Fsize && 
                         !locked[pr1 + cnt][pc1 + 1 + cnt] && 
                         !locked[pr2 + cnt][pc1 + 1 + cnt]);
                     
-                    br = (pr2 < Fsize - 1 && pc1 + 1 < Fsize && 
+                    br = (pr2 < Fsize  && pc1 + 1 < Fsize && 
                         !locked[pr1 + cnt][pc1 + 1 + cnt] && 
                         !locked[pr2 + cnt][pc1 + 1 + cnt]);
                     
@@ -1008,21 +1003,23 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                     //cout << tlr << " " << tlc << " " << brr << " " << brc << endl;
                 }
                 if(tlr != -1 && tlc != -1 && brr != -1 && brc != -1) {
-                    pair<int, vector<Rotation>> move_extend_free_pair_result = move_extend_free_pair(grid, tlr, tlc, brr, brc, row, j);
-                    if(DEBUG) {
+                    pair<int, vector<Rotation>> move_extend_free_pair_result = move_extend_free_pair(apply_rotations(grid, extend_result.path), tlr, tlc, brr, brc, row, j);
+                    extend_result.path.insert(extend_result.path.end(), move_extend_free_pair_result.second.begin(), move_extend_free_pair_result.second.end());
+                    extend_result.cost += move_extend_free_pair_result.first;
+                    if (DEBUG)
+                    {
                         cout << move_extend_free_pair_result.first << endl;
                     }
-                    if(move_extend_free_pair_result.first <= 2) {
-                        partial_result = move_extend_free_pair_result.second;
-                        min_ops = move_extend_free_pair_result.first;
-                        cout << "Using extend free pair (" << tlr << "," << tlc << ")-(" << brr << "," << brc << ") with cost " << min_ops << ". ";
-                        return {min_ops, partial_result};
-                    }
-                    if (move_extend_free_pair_result.first < min_ops)
+
+                    if (extend_result.cost < min_ops)
                     {
-                        partial_result = move_extend_free_pair_result.second;
-                        min_ops = move_extend_free_pair_result.first;
+                        partial_result = extend_result.path;
+                        min_ops =extend_result.cost;
                         cout << "Using extend free pair (" << tlr << "," << tlc << ")-(" << brr << "," << brc << ") with cost " << min_ops << ". ";
+                        // if (move_extend_free_pair_result.first <= 2)
+                        // {
+                        //     return {min_ops, partial_result};
+                        // }
                     }
                 }
             } 
