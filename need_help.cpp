@@ -440,7 +440,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr2, pc1 - 1, pr1, pc1 - 1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -453,7 +453,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1, pc1 - 1, pr2, pc1 - 1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -466,7 +466,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr2, pc1 + 1, pr1, pc1 + 1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -479,7 +479,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1, pc1 + 1, pr2, pc1 + 1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -493,7 +493,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1 - 1, pc2, pr1 - 1, pc1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -506,7 +506,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1 + 1, pc2, pr1 + 1, pc1, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -519,7 +519,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1 - 1, pc1, pr1 - 1, pc2, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -532,7 +532,7 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
             locked[pr1 + cnt][pc1 + cnt] = 1;
             locked[pr2 + cnt][pc2 + cnt] = 1;
             temp = search_pair(initial_grid, pr1 + 1, pc1, pr1 + 1, pc2, 
-                0, N, 0, N);
+                0, N - 1, 0, N - 1);
             locked[pr1 + cnt][pc1 + cnt] = 0;
             locked[pr2 + cnt][pc2 + cnt] = 0;
             if(temp.first < result.cost) {
@@ -547,11 +547,11 @@ ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
         result.position = {-1, -1, -1, -1};
         result.path = {};
         if(DEBUG) {
-            cout << "Extend failed, cost=1000" << endl;
+           //cout << "Extend failed, cost=1000" << endl;
         }
     } else {
         if(DEBUG) {
-            cout << "Extend succeeded, cost=" << result.cost << endl;
+            //cout << "Extend succeeded, cost=" << result.cost << endl;
         }
     }
     
@@ -562,7 +562,7 @@ pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>>
                                                     int tlr, int tlc, int brr, int brc,
                                                     int target_r, int target_c) {
     if(DEBUG) {
-        cout << "Moving Extemded FREE PAIR!" << endl;
+        cout << endl << "Moving Extended pair with cost: " << endl;
     }
     const int beam_width = 30;
     const int max_depth = 5;
@@ -1005,10 +1005,13 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 
                 auto [tlr, tlc, brr, brc] = extend_result.position;
                 if(DEBUG) {
-                    cout << tlr << " " << tlc << " " << brr << " " << brc << endl;
+                    //cout << tlr << " " << tlc << " " << brr << " " << brc << endl;
                 }
                 if(tlr != -1 && tlc != -1 && brr != -1 && brc != -1) {
                     pair<int, vector<Rotation>> move_extend_free_pair_result = move_extend_free_pair(grid, tlr, tlc, brr, brc, row, j);
+                    if(DEBUG) {
+                        cout << move_extend_free_pair_result.first << endl;
+                    }
                     if(move_extend_free_pair_result.first <= 2) {
                         partial_result = move_extend_free_pair_result.second;
                         min_ops = move_extend_free_pair_result.first;
