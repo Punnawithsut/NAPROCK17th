@@ -1001,6 +1001,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 auto [tlr, tlc, brr, brc] = extend_result.position;
                 if(DEBUG) {
                     //cout << tlr << " " << tlc << " " << brr << " " << brc << endl;
+                    cout << "EXT RES: " << extend_result.cost << endl;
                 }
                 if(tlr != -1 && tlc != -1 && brr != -1 && brc != -1) {
                     pair<int, vector<Rotation>> move_extend_free_pair_result = move_extend_free_pair(apply_rotations(grid, extend_result.path), tlr, tlc, brr, brc, row, j);
