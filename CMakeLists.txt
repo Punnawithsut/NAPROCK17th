@@ -16,7 +16,7 @@ endif()
 find_package(cpr CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_executable(app need_help.cpp)
+add_executable(app main.cpp)
 
 target_include_directories(app PRIVATE .)
 
