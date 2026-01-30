@@ -737,9 +737,9 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     //         return {min_ops, partial_result};
     // }
     int err = 0;
-    for (int i = Fsize-3; i > row ; i--)
+    for (int step = Fsize/2 -4+j;step>=j;step--)
     {
-        for (int step = Fsize/2 -5+j;step>=j;step--)
+        for (int i = min(row + Fsize - 3 - step, Fsize - 3); i > row; i--)
         {
             auto [ops1, path1] = search_pair(grid, i, step+1, i, step, 0, Fsize - 1, 0, Fsize - 1);
             if(ops1 != 1){
@@ -753,9 +753,9 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
             if(ops1 == 1)
             {
                 int k = i - row + step - j + 1, r = row - (step - j);
-                if (k > 12 || r < 0 || j + k >= Fsize){
+                if (r < 0 || j + k >= Fsize){
                     err++;
-                    cout<<'\n'<< k<<' '<< r <<' '<< j<<' ';
+                    cout<<'\n'<< k<<' '<< cnt + r <<' '<< cnt + j<<' ';
                     continue;}
                 if (locked[r + cnt][j + cnt + k - 1] || locked[r + cnt + k - 1][j + cnt + k - 1])
                 {
