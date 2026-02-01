@@ -848,10 +848,48 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         locked[cnt + row + 1][cnt + j] = 0;
         locked[cnt + row + 1][cnt + j + 1] = 0;
     }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    // First 3
+    {
+        auto [ops1, path1] = search_pair(grid, row, j, row + 1, j, 0, Fsize - 1, 0, Fsize - 1);
+        if (ops1 >= 2)
+        {
+            auto [ops1t, path1t] = search_pair(grid, row + 1, j, row, j, 0, Fsize - 1, 0, Fsize - 1);
+            if (ops1t < ops1)
+            {
+                ops1 = ops1t;
+                path1 = path1t;
+            }
+        }
+
+        locked[cnt + row][cnt + j] = 1;
+        locked[cnt + row + 1][cnt + j] = 1;
+
+        auto grid_temp = apply_rotations(grid, path1);
+        auto [ops2, path2] = search_pair(grid_temp, row, j + 1, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
+        if (ops2 >= 2)
+        {
+            auto [ops2t, path2t] = search_pair(grid_temp, row + 1, j + 1, row, j + 1, 0, Fsize - 1, 0, Fsize - 1);
+            if (ops2t < ops2)
+            {
+                ops2 = ops2t;
+                path2 = path2t;
+            }
+        }
+
+        if (ops1 + ops2 < min_ops)
+        {
+            min_ops = ops1 + ops2 + 1;
+            partial_result = path1;
+        }
+
+        locked[cnt + row][cnt + j] = 0;
+        locked[cnt + row + 1][cnt + j] = 0;
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    if (min_ops <= 2)
+    if (min_ops <= 3)
     {
         return {min_ops, partial_result};
     }
