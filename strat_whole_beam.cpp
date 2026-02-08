@@ -222,10 +222,10 @@ int calculate_manhattan_heuristic(const vector<vector<int>> &grid)
     {
         auto &p1 = coords[v][0];
         auto &p2 = coords[v][1];
-        int d = abs(p1.first - p2.first) + abs(p1.second - p2.second) + abs(max(p1.first - p2.first, p1.second - p2.second));
+        int d = (abs(p1.first - p2.first) + abs(p1.second - p2.second))+ max(abs(p1.first - p2.first) , abs(p1.second - p2.second));
         total_distance += d;
     }
-    
+
     return total_distance;
 }
 
@@ -595,7 +595,7 @@ vector<vector<int>> apply_rotations(vector<vector<int>> grid, const vector<Rotat
 }
 
 int main() {
-    int T = 10;
+    int T = 1;
     int d = 12;
 
     omp_set_num_threads(omp_get_max_threads());
