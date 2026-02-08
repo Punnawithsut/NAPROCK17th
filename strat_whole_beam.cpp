@@ -222,10 +222,10 @@ int calculate_manhattan_heuristic(const vector<vector<int>> &grid)
     {
         auto &p1 = coords[v][0];
         auto &p2 = coords[v][1];
-        int d = (abs(p1.first - p2.first) + abs(p1.second - p2.second))+ max(abs(p1.first - p2.first) , abs(p1.second - p2.second));
+        int d = abs(p1.first - p2.first) + abs(p1.second - p2.second) + abs(max(p1.first - p2.first, p1.second - p2.second));
         total_distance += d;
     }
-
+    
     return total_distance;
 }
 
@@ -261,30 +261,99 @@ string get_grid_key(const vector<vector<int>> &grid)
     return key;
 }
 
+vector<vector<int>> apply_macro_cycle(vector<vector<int>> grid, int k, int i, int j, vector<Rotation>& path) {
+    // Macro cycle C = (YX)^4 as defined in the research paper
+    // X is rotation at (i, j), Y is rotation at (i, j+1)
+    // This cycles numbers along the "conveyor belt" of the combined blocks
+    for (int step = 0; step < 4; ++step) {
+        // Y rotation
+        grid = rotate_submatrix(grid, k, i, j + 1);
+        path.emplace_back(k, i, j + 1);
+        // X rotation
+        grid = rotate_submatrix(grid, k, i, j);
+        path.emplace_back(k, i, j);
+    }
+    return grid;
+}
+
 vector<GridState> unstuck_healing(const GridState& stuck_state, int num_random_moves)
 {
-    cout << "HEALING: Applying " << num_random_moves << " random moves to escape local optimum..." << endl;
+    cout << "HEALING: Applying combination of random moves and 3-cycle macro moves..." << endl;
     
     vector<GridState> healed_states;
     random_device rd;
     mt19937 gen(rd());
     
-    for (int attempt = 0; attempt < 10; attempt++) {
+    // Generate more diverse healing attempts
+    for (int attempt = 0; attempt < 15; attempt++) {
         vector<vector<int>> current_grid = stuck_state.grid;
         vector<Rotation> current_path = stuck_state.path;
         
-        for (int move = 0; move < num_random_moves; move++) {
-            uniform_int_distribution<> k_dist(2, min(8, n));
-            int k = k_dist(gen);
+        // Strategy 1: Pure random moves (40% of attempts)
+        if (attempt < 6) {
+            for (int move = 0; move < num_random_moves; move++) {
+                uniform_int_distribution<> k_dist(2, min(8, n));
+                int k = k_dist(gen);
+                
+                uniform_int_distribution<> i_dist(0, n - k);
+                int i = i_dist(gen);
+                
+                uniform_int_distribution<> j_dist(0, n - k);
+                int j = j_dist(gen);
+                
+                current_grid = rotate_submatrix(current_grid, k, i, j);
+                current_path.emplace_back(k, i, j);
+            }
+        }
+        // Strategy 2: Mix of 3-cycle macro moves and random moves (40% of attempts)
+        else if (attempt < 12) {
+            int num_macro_cycles = num_random_moves / 2;
+            int num_regular_moves = num_random_moves - (num_macro_cycles * 8); // Each cycle = 8 moves
             
-            uniform_int_distribution<> i_dist(0, n - k);
-            int i = i_dist(gen);
+            for (int cycle = 0; cycle < num_macro_cycles; cycle++) {
+                uniform_int_distribution<> k_dist(2, min(7, n - 1)); // Need space for j+1
+                int k = k_dist(gen);
+                
+                uniform_int_distribution<> i_dist(0, n - k);
+                int i = i_dist(gen);
+                
+                uniform_int_distribution<> j_dist(0, n - k - 1); // Leave room for j+1
+                int j = j_dist(gen);
+                
+                current_grid = apply_macro_cycle(current_grid, k, i, j, current_path);
+            }
             
-            uniform_int_distribution<> j_dist(0, n - k);
-            int j = j_dist(gen);
+            // Add some random moves on top
+            for (int move = 0; move < num_regular_moves; move++) {
+                uniform_int_distribution<> k_dist(2, min(8, n));
+                int k = k_dist(gen);
+                
+                uniform_int_distribution<> i_dist(0, n - k);
+                int i = i_dist(gen);
+                
+                uniform_int_distribution<> j_dist(0, n - k);
+                int j = j_dist(gen);
+                
+                current_grid = rotate_submatrix(current_grid, k, i, j);
+                current_path.emplace_back(k, i, j);
+            }
+        }
+        // Strategy 3: Pure 3-cycle macro moves (20% of attempts)
+        else {
+            int num_macro_cycles = (num_random_moves + 7) / 8; // Convert to number of cycles
             
-            current_grid = rotate_submatrix(current_grid, k, i, j);
-            current_path.emplace_back(k, i, j);
+            for (int cycle = 0; cycle < num_macro_cycles; cycle++) {
+                uniform_int_distribution<> k_dist(2, min(7, n - 1));
+                int k = k_dist(gen);
+                
+                uniform_int_distribution<> i_dist(0, n - k);
+                int i = i_dist(gen);
+                
+                uniform_int_distribution<> j_dist(0, n - k - 1);
+                int j = j_dist(gen);
+                
+                current_grid = apply_macro_cycle(current_grid, k, i, j, current_path);
+            }
         }
         
         int new_paired = count_paired_values(current_grid);
@@ -301,6 +370,10 @@ vector<GridState> unstuck_healing(const GridState& stuck_state, int num_random_m
     });
     
     cout << "HEALING: Best healed state has " << healed_states[0].paired_count << " pairs" << endl;
+    cout << "HEALING: Top 3 healed states: " 
+         << healed_states[0].paired_count << ", "
+         << healed_states[min(1, (int)healed_states.size()-1)].paired_count << ", "
+         << healed_states[min(2, (int)healed_states.size()-1)].paired_count << " pairs" << endl;
     
     return healed_states;
 }
@@ -409,6 +482,40 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                         {
                             if (solution_found) break;
                             
+                            // Try 3-cycle macro move when getting stuck (stuck_counter >= 3)
+                            // This gives the algorithm a chance to escape before triggering backtracking
+                            if (stuck_counter >= 3 && j + 1 <= n - k) {
+                                vector<Rotation> macro_path = current.path;
+                                vector<vector<int>> macro_grid = apply_macro_cycle(current.grid, k, i, j, macro_path);
+                                int macro_paired = count_paired_values(macro_grid);
+                                
+                                if (macro_paired >= current.paired_count) {
+                                    int macro_heuristic = calculate_manhattan_heuristic(macro_grid);
+                                    
+                                    if (macro_paired > local_best_paired) {
+                                        local_best_paired = macro_paired;
+                                    }
+                                    
+                                    if (is_solved(macro_grid)) {
+                                        #pragma omp critical(solution)
+                                        {
+                                            if (!solution_found) {
+                                                solution_found = true;
+                                                solution_path = macro_path;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    
+                                    string macro_key = get_grid_key(macro_grid);
+                                    if (thread_local_visited[thread_id].find(macro_key) == thread_local_visited[thread_id].end()) {
+                                        thread_local_visited[thread_id].insert(macro_key);
+                                        thread_local_states[thread_id].push_back({macro_grid, macro_path, macro_paired, macro_heuristic});
+                                    }
+                                }
+                            }
+                            
+                            // Standard single rotation move
                             vector<vector<int>> new_grid = rotate_submatrix(current.grid, k, i, j);
                             int new_paired = count_paired_values(new_grid);
                             
@@ -508,31 +615,85 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                 cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
                 cout << "Stuck at " << best_paired_in_depth << " pairs for " << stuck_counter << " iterations" << endl;
                 
-                // Get the previous state
-                StateSnapshot& prev_snapshot = state_history.back();
+                // Find a valid state to backtrack to
+                bool found_valid_backtrack = false;
+                StateSnapshot backtrack_target;
                 
-                cout << "Reverting to previous state with " << prev_snapshot.paired_count 
-                     << " pairs (depth " << prev_snapshot.depth_at_snapshot << ")" << endl;
-                
-                // Increase beam width by 1.5x
-                beam_multiplier = prev_snapshot.beam_multiplier * 1.5;
-                cout << "Increasing beam width multiplier to " << beam_multiplier 
-                     << " (effective width: " << (int)(base_beam_width * beam_multiplier) << ")" << endl;
-                
-                // Restore the beam with previous states
-                next_beam = priority_queue<GridState>();
-                for (const auto& state : prev_snapshot.beam_states) {
-                    next_beam.push(state);
+                // Start from the most recent state and go backwards
+                while (!state_history.empty()) {
+                    StateSnapshot candidate = state_history.back();
+                    state_history.pop_back(); // Remove this state from history
+                    
+                    // Check if this state has a different paired count than current stuck state
+                    // This prevents backtracking to the same paired count we're stuck at
+                    if (candidate.paired_count < best_paired_in_depth) {
+                        backtrack_target = candidate;
+                        found_valid_backtrack = true;
+                        cout << "Found valid backtrack target at " << backtrack_target.paired_count 
+                             << " pairs (depth " << backtrack_target.depth_at_snapshot << ")" << endl;
+                        break;
+                    } else {
+                        cout << "Skipping state at " << candidate.paired_count 
+                             << " pairs (same or higher than current stuck state)" << endl;
+                    }
                 }
                 
-                // Update the snapshot with new multiplier
-                state_history.back().beam_multiplier = beam_multiplier;
-                
-                // Reset stuck counter
-                stuck_counter = 0;
-                last_best_paired = prev_snapshot.paired_count;
-                
-                cout << "Backtracking complete. Continuing search with expanded beam...\n" << endl;
+                if (found_valid_backtrack) {
+                    cout << "Reverting to state with " << backtrack_target.paired_count 
+                         << " pairs (depth " << backtrack_target.depth_at_snapshot << ")" << endl;
+                    
+                    // Increase beam width by 1.5x from the backtrack target's multiplier
+                    beam_multiplier = backtrack_target.beam_multiplier * 1.5;
+                    cout << "Increasing beam width multiplier to " << beam_multiplier 
+                         << " (effective width: " << (int)(base_beam_width * beam_multiplier) << ")" << endl;
+                    
+                    // Restore the beam with previous states
+                    next_beam = priority_queue<GridState>();
+                    for (const auto& state : backtrack_target.beam_states) {
+                        next_beam.push(state);
+                    }
+                    
+                    // Add the backtrack target back to history with updated multiplier
+                    backtrack_target.beam_multiplier = beam_multiplier;
+                    state_history.push_back(backtrack_target);
+                    
+                    // Reset stuck counter and update last best AND best_paired_in_depth
+                    stuck_counter = 0;
+                    last_best_paired = backtrack_target.paired_count;
+                    best_paired_in_depth = backtrack_target.paired_count; // CRITICAL: Update this too!
+                    
+                    cout << "Backtracking complete. Continuing search with expanded beam..." << endl;
+                    cout << "Remaining history depth: " << state_history.size() << " snapshots\n" << endl;
+                    
+                } else {
+                    // All history exhausted or no valid backtrack found
+                    cout << "No valid backtrack state found (history exhausted or all at same level)" << endl;
+                    cout << "Triggering healing mechanism as last resort..." << endl;
+                    
+                    GridState best_current = current_states[0];
+                    for (const auto& state : current_states) {
+                        if (state.paired_count > best_current.paired_count) {
+                            best_current = state;
+                        }
+                    }
+                    
+                    int num_random_moves = min(10, n / 2);
+                    vector<GridState> healed = unstuck_healing(best_current, num_random_moves);
+                    
+                    int best_healed_paired = 0;
+                    for (const auto& healed_state : healed) {
+                        next_beam.push(healed_state);
+                        best_healed_paired = max(best_healed_paired, healed_state.paired_count);
+                    }
+                    
+                    // Update best_paired_in_depth for healed states
+                    if (best_healed_paired > 0) {
+                        best_paired_in_depth = best_healed_paired;
+                        last_best_paired = best_healed_paired;
+                    }
+                    
+                    stuck_counter = 0;
+                }
                 
             } else {
                 // No history to backtrack to, use healing instead
@@ -548,8 +709,16 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                 int num_random_moves = min(10, n / 2);
                 vector<GridState> healed = unstuck_healing(best_current, num_random_moves);
                 
+                int best_healed_paired = 0;
                 for (const auto& healed_state : healed) {
                     next_beam.push(healed_state);
+                    best_healed_paired = max(best_healed_paired, healed_state.paired_count);
+                }
+                
+                // Update best_paired_in_depth for healed states
+                if (best_healed_paired > 0) {
+                    best_paired_in_depth = best_healed_paired;
+                    last_best_paired = best_healed_paired;
                 }
                 
                 stuck_counter = 0;
@@ -595,7 +764,7 @@ vector<vector<int>> apply_rotations(vector<vector<int>> grid, const vector<Rotat
 }
 
 int main() {
-    int T = 1;
+    int T = 10;
     int d = 12;
 
     omp_set_num_threads(omp_get_max_threads());
