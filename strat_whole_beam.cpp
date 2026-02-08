@@ -15,6 +15,7 @@
 #include <mutex>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
+#include <random>
 
 using namespace std;
 using namespace std::chrono;
@@ -174,6 +175,7 @@ int count_paired_values(const vector<vector<int>> &grid)
             int val = grid[i][j];
             if (val < 0 || val >= total_values) {
                 cerr << "Invalid value " << val << " at position (" << i << "," << j << ")" << endl;
+                cerr << "Expected values in range [0, " << total_values-1 << "]" << endl;
                 throw runtime_error("Invalid grid value");
             }
             coords[val].push_back({i, j});
@@ -220,7 +222,7 @@ int calculate_manhattan_heuristic(const vector<vector<int>> &grid)
     {
         auto &p1 = coords[v][0];
         auto &p2 = coords[v][1];
-        int d = abs(p1.first - p2.first) + abs(p1.second - p2.second);
+        int d = abs(p1.first - p2.first) + abs(p1.second - p2.second) + abs(max(p1.first - p2.first, p1.second - p2.second));
         total_distance += d;
     }
     
@@ -259,16 +261,69 @@ string get_grid_key(const vector<vector<int>> &grid)
     return key;
 }
 
+vector<GridState> unstuck_healing(const GridState& stuck_state, int num_random_moves)
+{
+    cout << "HEALING: Applying " << num_random_moves << " random moves to escape local optimum..." << endl;
+    
+    vector<GridState> healed_states;
+    random_device rd;
+    mt19937 gen(rd());
+    
+    for (int attempt = 0; attempt < 10; attempt++) {
+        vector<vector<int>> current_grid = stuck_state.grid;
+        vector<Rotation> current_path = stuck_state.path;
+        
+        for (int move = 0; move < num_random_moves; move++) {
+            uniform_int_distribution<> k_dist(2, min(8, n));
+            int k = k_dist(gen);
+            
+            uniform_int_distribution<> i_dist(0, n - k);
+            int i = i_dist(gen);
+            
+            uniform_int_distribution<> j_dist(0, n - k);
+            int j = j_dist(gen);
+            
+            current_grid = rotate_submatrix(current_grid, k, i, j);
+            current_path.emplace_back(k, i, j);
+        }
+        
+        int new_paired = count_paired_values(current_grid);
+        int new_heuristic = calculate_manhattan_heuristic(current_grid);
+        
+        healed_states.push_back({current_grid, current_path, new_paired, new_heuristic});
+    }
+    
+    sort(healed_states.begin(), healed_states.end(), [](const GridState& a, const GridState& b) {
+        if (a.paired_count != b.paired_count) {
+            return a.paired_count > b.paired_count;
+        }
+        return a.heuristic < b.heuristic;
+    });
+    
+    cout << "HEALING: Best healed state has " << healed_states[0].paired_count << " pairs" << endl;
+    
+    return healed_states;
+}
+
+// State snapshot for backtracking
+struct StateSnapshot {
+    vector<GridState> beam_states;
+    int paired_count;
+    int depth_at_snapshot;
+    double beam_multiplier;
+};
+
 vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_depth)
 {
     int initial_paired = count_paired_values(initial_grid);
     int initial_heuristic = calculate_manhattan_heuristic(initial_grid);
     int target_paired = n * n / 2;
 
-    int beam_width = 184320 / (n * n);
+    int base_beam_width = 92160 / (n * n);
+    double beam_multiplier = 1.0;
     
     int num_threads = omp_get_max_threads();
-    cout << "Starting Parallel Beam Search (beam width: " << beam_width << ", threads: " << num_threads << ")\n";
+    cout << "Starting Parallel Beam Search (base beam width: " << base_beam_width << ", threads: " << num_threads << ")\n";
     cout << "Initial paired count: " << initial_paired << "/" << target_paired << "\n";
 
     priority_queue<GridState> beam;
@@ -276,6 +331,11 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
 
     GridState global_best = {initial_grid, {}, initial_paired, initial_heuristic};
     int depth = 0;
+    int stuck_counter = 0;
+    int last_best_paired = initial_paired;
+    
+    // State history for backtracking
+    vector<StateSnapshot> state_history;
 
     for (; depth < max_depth && !beam.empty(); ++depth)
     {
@@ -407,8 +467,22 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
         cout << "Depth " << depth << ": processed " << current_states.size() 
              << " states, best paired: " << best_paired_in_depth << "/" << target_paired;
         
-        if (best_paired_in_depth > global_best.paired_count) {
+        if (best_paired_in_depth > last_best_paired) {
             cout << " (IMPROVED!)";
+            
+            // Save snapshot when we make progress
+            StateSnapshot snapshot;
+            snapshot.beam_states = current_states;
+            snapshot.paired_count = best_paired_in_depth;
+            snapshot.depth_at_snapshot = depth;
+            snapshot.beam_multiplier = beam_multiplier;
+            state_history.push_back(snapshot);
+            
+            last_best_paired = best_paired_in_depth;
+            stuck_counter = 0;
+        } else {
+            stuck_counter++;
+            cout << " (stuck: " << stuck_counter << "/5)";
         }
         cout << "\n";
 
@@ -428,9 +502,66 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
             }
         }
 
+        // BACKTRACKING MECHANISM: If stuck for more than 4 times, revert to previous state
+        if (stuck_counter >= 5) {
+            if (!state_history.empty()) {
+                cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
+                cout << "Stuck at " << best_paired_in_depth << " pairs for " << stuck_counter << " iterations" << endl;
+                
+                // Get the previous state
+                StateSnapshot& prev_snapshot = state_history.back();
+                
+                cout << "Reverting to previous state with " << prev_snapshot.paired_count 
+                     << " pairs (depth " << prev_snapshot.depth_at_snapshot << ")" << endl;
+                
+                // Increase beam width by 1.5x
+                beam_multiplier = prev_snapshot.beam_multiplier * 1.5;
+                cout << "Increasing beam width multiplier to " << beam_multiplier 
+                     << " (effective width: " << (int)(base_beam_width * beam_multiplier) << ")" << endl;
+                
+                // Restore the beam with previous states
+                next_beam = priority_queue<GridState>();
+                for (const auto& state : prev_snapshot.beam_states) {
+                    next_beam.push(state);
+                }
+                
+                // Update the snapshot with new multiplier
+                state_history.back().beam_multiplier = beam_multiplier;
+                
+                // Reset stuck counter
+                stuck_counter = 0;
+                last_best_paired = prev_snapshot.paired_count;
+                
+                cout << "Backtracking complete. Continuing search with expanded beam...\n" << endl;
+                
+            } else {
+                // No history to backtrack to, use healing instead
+                cout << "STUCK DETECTED! No history to backtrack. Triggering healing mechanism..." << endl;
+                
+                GridState best_current = current_states[0];
+                for (const auto& state : current_states) {
+                    if (state.paired_count > best_current.paired_count) {
+                        best_current = state;
+                    }
+                }
+                
+                int num_random_moves = min(10, n / 2);
+                vector<GridState> healed = unstuck_healing(best_current, num_random_moves);
+                
+                for (const auto& healed_state : healed) {
+                    next_beam.push(healed_state);
+                }
+                
+                stuck_counter = 0;
+            }
+        }
+
+        // Apply beam width with multiplier
+        int current_beam_width = (int)(base_beam_width * beam_multiplier);
+        
         beam = priority_queue<GridState>();
         int kept = 0;
-        while (!next_beam.empty() && kept < beam_width)
+        while (!next_beam.empty() && kept < current_beam_width)
         {
             GridState state = next_beam.top();
             if (state.paired_count >= best_paired_in_depth - 1)
@@ -446,7 +577,7 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
             break;
         }
         
-        cout << "Kept " << kept << " states for next depth\n";
+        cout << "Kept " << kept << " states for next depth (beam width: " << current_beam_width << ")\n";
     }
     
     cout << "Beam search completed to depth " << depth << endl;
