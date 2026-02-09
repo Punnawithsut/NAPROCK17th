@@ -16,6 +16,7 @@
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <random>
+#include <fstream>
 
 using namespace std;
 using namespace std::chrono;
@@ -26,6 +27,42 @@ struct Rotation
     int k, i, j;
     Rotation(int k, int i, int j) : k(k), i(i), j(j) {}
 };
+
+void save_file(const vector<vector<int>> &og, const vector<Rotation> &fp) {
+    const string SAVE_PATH = "result.json";
+    json result_file;
+    json board_json = json::array();
+    for (const auto &row : og) {
+        json row_json = json::array();
+        for (int val : row) {
+            row_json.push_back(val);
+        }
+        board_json.push_back(row_json);
+    }
+
+    result_file["initialBoard"] = board_json;
+    json rotations_map = json::object();
+
+    for (int k = 0; k < fp.size(); k++) {
+        string rotation_key = to_string(k + 1);
+        rotations_map[rotation_key] = {
+            {"k", fp[k].k},
+            {"i", fp[k].i},
+            {"j", fp[k].j}};
+    }
+
+    result_file["rotation"] = rotations_map;
+    
+    ofstream file(SAVE_PATH);
+    if (file.is_open()) {
+        file << result_file.dump(4);
+        file.close();
+        cout << "JSON result saved to " << SAVE_PATH << endl;
+    }
+    else {
+        cout << "Couldn't open file, save file failed" << endl;
+    }
+}
 
 vector<vector<int>> get_random_board(int n)
 {
@@ -764,8 +801,8 @@ vector<vector<int>> apply_rotations(vector<vector<int>> grid, const vector<Rotat
 }
 
 int main() {
-    int T = 10;
-    int d = 12;
+    int T = 1;
+    int d = 24;
 
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " OpenMP threads\n";
@@ -809,6 +846,10 @@ int main() {
             cout << "Paired count: " << final_paired << "/" << (n*n/2) << "\n";
             cout << "Moves: " << moves << "\n";
             cout << "Time: " << time_used << " seconds\n";
+
+            if (t == 0) { 
+                save_file(grid, solution_path); 
+            }
 
             if (solved) {
                 success_count++;
