@@ -11,6 +11,10 @@
 #include <tuple>
 #include <unordered_set>
 #include <vector>
+#include <mutex>
+#include <omp.h>
+#include <cpr/cpr.h>
+#include <nlohmann/json.hpp>
 
 using namespace std;
 using namespace std::chrono;
@@ -303,6 +307,7 @@ struct ChildCand {
   int real_score;
   double unified_score;
   uint64_t hash;
+  vector<pair<Point, Point>> val_positions;
 };
 
 // Forward Declaration
@@ -322,8 +327,9 @@ vector<Rotation> perform_beam_run(const vector<int> &initial_grid,
     beam_width = max(beam_width, 400);
   }
 
+  int num_threads = omp_get_max_threads();
   cout << "=== Beam Run (Width=" << beam_width << ", Depth=" << max_depth
-       << ") ===\n";
+       << ", Threads=" << num_threads << ") ===\n";
 
   priority_queue<GridState> beam;
   auto init_data = calculate_initial_score_and_pos(initial_grid);
@@ -355,83 +361,137 @@ vector<Rotation> perform_beam_run(const vector<int> &initial_grid,
     }
 
     int best_score_this_level = -1;
+    mutex best_mutex;
+    bool solution_found = false;
+    vector<Rotation> solution_path;
+    mutex solution_mutex;
 
-    for (const auto &current : current_beam_vec) {
-      if (current.real_score > best.real_score) {
-        best = current;
-      }
-      if (current.real_score == target_score)
-        return current.path;
+    int num_states = current_beam_vec.size();
+    vector<vector<ChildCand>> thread_local_candidates(num_threads);
 
-      int max_k = min(n, 7);
+    #pragma omp parallel
+    {
+      int thread_id = omp_get_thread_num();
+      int local_best_score = -1;
 
-      vector<ChildCand> candidates;
+      #pragma omp for schedule(dynamic)
+      for (int state_idx = 0; state_idx < num_states; ++state_idx) {
+        if (solution_found)
+          continue;
 
-      for (int k = 2; k <= max_k; ++k) {
-        for (int i = 0; i <= n - k; ++i) {
-          for (int j = 0; j <= n - k; ++j) {
-            vector<int> new_grid = rotate_submatrix(current.grid, k, i, j);
-            uint64_t new_hash = compute_hash_incremental(
-                current.hash, current.grid, new_grid, k, i, j);
+        const auto &current = current_beam_vec[state_idx];
 
-            if (global_visited.count(new_hash))
-              continue;
+        if (current.real_score > local_best_score) {
+          local_best_score = current.real_score;
+        }
 
-            int new_real = count_adjacent_pairs(new_grid);
-            if (new_real == target_score) {
-              vector<Rotation> path = current.path;
-              path.emplace_back(k, i, j);
-              return path;
+        if (current.real_score == target_score) {
+          #pragma omp critical(solution)
+          {
+            if (!solution_found) {
+              solution_found = true;
+              solution_path = current.path;
             }
+          }
+          continue;
+        }
 
-            auto update = calculate_incremental_update(current.unified_score,
-                                                       current.val_positions, k,
-                                                       i, j, current.grid);
-            double new_u = update.first;
-            // Deterministic: No randomness here
+        int max_k = min(n, 7);
+        vector<ChildCand> candidates;
 
-            candidates.push_back(
-                {new_grid, k, i, j, new_real, new_u, new_hash});
-            // HACK: Store pos map temporarily if needed, but candidates
-            // copies are expensive. Better: Recompute pos map only for kept
-            // candidates? Actually, we need it for next_beam. Let's add
-            // pos_map to ChildCand or recompute later. For now, let's
-            // optimize: don't store map in ChildCand to save sorting copy
-            // time. Recompute it when pushing to next_beam. WAIT!
-            // Recomputing is O(N^2) or O(k^2). O(k^2) is fast.
+        for (int k = 2; k <= max_k; ++k) {
+          if (solution_found)
+            break;
+          for (int i = 0; i <= n - k; ++i) {
+            if (solution_found)
+              break;
+            for (int j = 0; j <= n - k; ++j) {
+              if (solution_found)
+                break;
+
+              vector<int> new_grid = rotate_submatrix(current.grid, k, i, j);
+              uint64_t new_hash = compute_hash_incremental(
+                  current.hash, current.grid, new_grid, k, i, j);
+              int new_real = count_adjacent_pairs(new_grid);
+              if (new_real == target_score) {
+                #pragma omp critical(solution)
+                {
+                  if (!solution_found) {
+                    solution_found = true;
+                    vector<Rotation> path = current.path;
+                    path.emplace_back(k, i, j);
+                    solution_path = path;
+                  }
+                }
+                break;
+              }
+
+              auto update = calculate_incremental_update(current.unified_score,
+                                                         current.val_positions, k,
+                                                         i, j, current.grid);
+              double new_u = update.first;
+
+              candidates.push_back(
+                  {new_grid, k, i, j, new_real, new_u, new_hash, update.second});
+            }
           }
         }
+
+        if (candidates.size() > children_per_state) {
+          partial_sort(candidates.begin(),
+                       candidates.begin() + children_per_state, candidates.end(),
+                       [](const ChildCand &a, const ChildCand &b) {
+                         return a.unified_score > b.unified_score;
+                       });
+          candidates.resize(children_per_state);
+        } else {
+          sort(candidates.begin(), candidates.end(),
+               [](const ChildCand &a, const ChildCand &b) {
+                 return a.unified_score > b.unified_score;
+               });
+        }
+
+        thread_local_candidates[thread_id].insert(
+            thread_local_candidates[thread_id].end(), 
+            candidates.begin(), 
+            candidates.end());
       }
 
-      if (candidates.size() > children_per_state) {
-        partial_sort(candidates.begin(),
-                     candidates.begin() + children_per_state, candidates.end(),
-                     [](const ChildCand &a, const ChildCand &b) {
-                       return a.unified_score > b.unified_score;
-                     });
-        candidates.resize(children_per_state);
-      } else {
-        sort(candidates.begin(), candidates.end(),
-             [](const ChildCand &a, const ChildCand &b) {
-               return a.unified_score > b.unified_score;
-             });
+      #pragma omp critical(best)
+      {
+        if (local_best_score > best_score_this_level) {
+          best_score_this_level = local_best_score;
+        }
       }
+    }
 
-      for (const auto &cand : candidates) {
+    if (solution_found) {
+      return solution_path;
+    }
+
+    for (int t = 0; t < num_threads; ++t) {
+      for (const auto &cand : thread_local_candidates[t]) {
+        if (global_visited.count(cand.hash))
+          continue;
+
         global_visited.insert(cand.hash);
-        vector<Rotation> new_path = current.path;
+        vector<Rotation> new_path = current_beam_vec[0].path;
+        for (const auto &parent : current_beam_vec) {
+          vector<int> test_grid = rotate_submatrix(parent.grid, cand.k, cand.i, cand.j);
+          if (test_grid == cand.grid) {
+            new_path = parent.path;
+            break;
+          }
+        }
         new_path.emplace_back(cand.k, cand.i, cand.j);
 
-        // Regenerate the pos map efficiently using incremental logic
-        // This avoids storing it in the huge candidates vector
-        auto update = calculate_incremental_update(
-            current.unified_score, current.val_positions, cand.k, cand.i,
-            cand.j, current.grid);
-
         next_beam.push({cand.grid, new_path, cand.real_score,
-                        cand.unified_score, cand.hash, update.second});
-        if (cand.real_score > best_score_this_level)
-          best_score_this_level = cand.real_score;
+                        cand.unified_score, cand.hash, cand.val_positions});
+
+        if (cand.real_score > best.real_score) {
+          best = {cand.grid, new_path, cand.real_score,
+                  cand.unified_score, cand.hash, cand.val_positions};
+        }
       }
     }
 
@@ -482,12 +542,8 @@ vector<Rotation> beam_search(const vector<int> &initial_grid) {
     return best_path;
 
   // Stage 3: Ultra-Wide Deterministic Fallback (+10% buffer)
-  // Replaces Randomized Loop with a massive single deterministic search
-  // Enabled by the huge speedup from 1D vector optimization
-  // incase stage 2 doesn't find solution so this will be the last lifeline
   cout << "--- Stage 3: Ultra-Wide Deterministic Search (Width 2500, Depth "
-          ") "
-       << buffer << "---\n";
+       << buffer << ") ---\n";
   path = perform_beam_run(initial_grid, 2500, buffer);
 
   return path;
@@ -528,6 +584,9 @@ void print_grid(const vector<int> &grid) {
 }
 
 int main() {
+  omp_set_num_threads(omp_get_max_threads());
+  cout << "Using " << omp_get_max_threads() << " OpenMP threads\n\n";
+
   init_zobrist();
   int grid_size = size_grid;
 
@@ -566,14 +625,14 @@ int main() {
   cout << "Time: " << fixed << setprecision(2) << elapsed << "s\n";
 
   bool strict_satisfied = (solution.size() <= n * n / 2);
-  bool relaxed_satisfied = (solution.size() <= 80);
+  bool relaxed_satisfied = (solution.size() <= buffer);
 
   if (strict_satisfied) {
     cout << "✓ Strict Constraint satisfied\n";
   } else if (relaxed_satisfied) {
-    cout << "✓ 10% Buffer Constraint satisfied (<=\n" << buffer << ")";
+    cout << "✓ 10% Buffer Constraint satisfied (<=" << buffer << ")\n";
   } else {
-    cout << "✗ Constraint satisfied\n";
+    cout << "✗ Constraint not satisfied\n";
   }
 
   return 0;
