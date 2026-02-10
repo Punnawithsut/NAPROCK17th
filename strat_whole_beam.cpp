@@ -429,7 +429,7 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
     int initial_heuristic = calculate_manhattan_heuristic(initial_grid);
     int target_paired = n * n / 2;
 
-    int base_beam_width = 92160 / (n * n);
+    int base_beam_width = 184320 / (n * n);
     double beam_multiplier = 1.0;
     
     int num_threads = omp_get_max_threads();
@@ -801,8 +801,8 @@ vector<vector<int>> apply_rotations(vector<vector<int>> grid, const vector<Rotat
 }
 
 int main() {
-    int T = 1;
-    int d = 24;
+    int T = 10;
+    int d = 10;
 
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " OpenMP threads\n";
@@ -847,7 +847,10 @@ int main() {
             cout << "Moves: " << moves << "\n";
             cout << "Time: " << time_used << " seconds\n";
 
-            if (t == 0) { 
+            int save;
+            cin >> save;
+
+            if (save) { 
                 save_file(grid, solution_path); 
             }
 
