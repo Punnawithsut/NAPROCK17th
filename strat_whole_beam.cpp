@@ -16,7 +16,6 @@
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <random>
-#include <fstream>
 
 using namespace std;
 using namespace std::chrono;
@@ -155,7 +154,7 @@ struct GridState
 
 int n;
 auto start_time = high_resolution_clock::now();
-const double TIME_LIMIT = 270.0;
+const double TIME_LIMIT = 125.0;
 
 bool is_time_up()
 {
@@ -446,6 +445,9 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
     
     // State history for backtracking
     vector<StateSnapshot> state_history;
+    
+    // Track how many times we've backtracked to each paired count level
+    unordered_map<int, int> paired_count_visits;
 
     for (; depth < max_depth && !beam.empty(); ++depth)
     {
@@ -519,9 +521,8 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                         {
                             if (solution_found) break;
                             
-                            // Try 3-cycle macro move when getting stuck (stuck_counter >= 3)
-                            // This gives the algorithm a chance to escape before triggering backtracking
-                            if (stuck_counter >= 3 && j + 1 <= n - k) {
+                            //3 cycle
+                            if (stuck_counter >= 4 && j + 1 <= n - k) {
                                 vector<Rotation> macro_path = current.path;
                                 vector<vector<int>> macro_grid = apply_macro_cycle(current.grid, k, i, j, macro_path);
                                 int macro_paired = count_paired_values(macro_grid);
@@ -552,7 +553,6 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                                 }
                             }
                             
-                            // Standard single rotation move
                             vector<vector<int>> new_grid = rotate_submatrix(current.grid, k, i, j);
                             int new_paired = count_paired_values(new_grid);
                             
@@ -646,29 +646,36 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
             }
         }
 
-        // BACKTRACKING MECHANISM: If stuck for more than 4 times, revert to previous state
         if (stuck_counter >= 5) {
             if (!state_history.empty()) {
                 cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
                 cout << "Stuck at " << best_paired_in_depth << " pairs for " << stuck_counter << " iterations" << endl;
                 
-                // Find a valid state to backtrack to
                 bool found_valid_backtrack = false;
                 StateSnapshot backtrack_target;
                 
                 // Start from the most recent state and go backwards
                 while (!state_history.empty()) {
                     StateSnapshot candidate = state_history.back();
-                    state_history.pop_back(); // Remove this state from history
+                    state_history.pop_back();
                     
-                    // Check if this state has a different paired count than current stuck state
-                    // This prevents backtracking to the same paired count we're stuck at
                     if (candidate.paired_count < best_paired_in_depth) {
-                        backtrack_target = candidate;
-                        found_valid_backtrack = true;
-                        cout << "Found valid backtrack target at " << backtrack_target.paired_count 
-                             << " pairs (depth " << backtrack_target.depth_at_snapshot << ")" << endl;
-                        break;
+                        int visit_count = paired_count_visits[candidate.paired_count];
+                        
+                        if (visit_count < 2) {
+                            backtrack_target = candidate;
+                            found_valid_backtrack = true;
+                            
+                            paired_count_visits[candidate.paired_count]++;
+                            
+                            cout << "Found valid backtrack target at " << backtrack_target.paired_count 
+                                 << " pairs (depth " << backtrack_target.depth_at_snapshot 
+                                 << ", visit #" << paired_count_visits[candidate.paired_count] << ")" << endl;
+                            break;
+                        } else {
+                            cout << "Skipping state at " << candidate.paired_count 
+                                 << " pairs (already visited " << visit_count << " times)" << endl;
+                        }
                     } else {
                         cout << "Skipping state at " << candidate.paired_count 
                              << " pairs (same or higher than current stuck state)" << endl;
@@ -700,7 +707,12 @@ vector<Rotation> beam_search(const vector<vector<int>> &initial_grid, int max_de
                     best_paired_in_depth = backtrack_target.paired_count; // CRITICAL: Update this too!
                     
                     cout << "Backtracking complete. Continuing search with expanded beam..." << endl;
-                    cout << "Remaining history depth: " << state_history.size() << " snapshots\n" << endl;
+                    cout << "Remaining history depth: " << state_history.size() << " snapshots" << endl;
+                    cout << "Visit statistics: ";
+                    for (const auto& p : paired_count_visits) {
+                        cout << p.first << "pairs:" << p.second << "x ";
+                    }
+                    cout << "\n" << endl;
                     
                 } else {
                     // All history exhausted or no valid backtrack found
@@ -801,8 +813,8 @@ vector<vector<int>> apply_rotations(vector<vector<int>> grid, const vector<Rotat
 }
 
 int main() {
-    int T = 10;
-    int d = 10;
+    int T = 20;
+    int d = 12;
 
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " OpenMP threads\n";
@@ -847,11 +859,9 @@ int main() {
             cout << "Moves: " << moves << "\n";
             cout << "Time: " << time_used << " seconds\n";
 
-            int save;
-            cin >> save;
-
-            if (save) { 
-                save_file(grid, solution_path); 
+            int save = 1; //cin >> save;
+            if(save) {
+                save_file(grid, solution_path);
             }
 
             if (solved) {
