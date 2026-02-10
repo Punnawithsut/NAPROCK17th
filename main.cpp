@@ -879,7 +879,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
         if (ops1 + ops2 < min_ops)
         {
-            min_ops = ops1 + ops2 + 1;
+            min_ops = ops1 + ops2 ;
             partial_result = path1;
         }
 
