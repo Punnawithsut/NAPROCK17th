@@ -2,6 +2,7 @@ node_modules
 run1.exe 
 run2.exe
 temp.cpp
+temp2.cpp
 build
 result.json
 test
