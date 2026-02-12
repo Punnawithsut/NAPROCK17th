@@ -13,12 +13,19 @@ struct Rotation
     Rotation(int k, int i, int j) : k(k), i(i), j(j) {}
 };
 
+struct ExtendedPair {
+    tuple<int, int, int, int> position; //since it is square only collect top left row, top left col, buttom right row, bottom right col.
+    int cost;
+    vector<Rotation> path;
+};
+
 vector<vector<uint8_t>> locked;
 int n;
 int cnt = 0;
 int side = 0;
 bool broke = false;
 bool SET_FP = true;
+bool DEBUG = false;
 
 vector<vector<uint16_t>> get_random_board(int n)
 {
@@ -325,7 +332,8 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
     return {999, {}};
 }
 
-pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1, int row2, int col2)
+pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1, int row2, int col2,
+                                        int mnr, int mxr, int mnc, int mxc)
 {
     const int beam_width = 30 + cnt * 5;
     const int max_depth = 5;
@@ -334,7 +342,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
     if (current_beam[0].pos.first == -1)
     {
-        cout << row1 << ' ' << col1 << " Broke\n";
+        //cout << row1 << ' ' << col1 << " Broke\n";
         broke = true;
         return {1000, {}};
     }
@@ -366,9 +374,9 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
                                  24);
                      k >= 2; --k)
                 {
-                    for (int r = 0; r <= N - k; ++r)
+                    for (int r = mnr; r <= mxr + 1 - k; ++r)
                     {
-                        for (int c = 0; c <= N - k; ++c)
+                        for (int c = mnc; c <= mxc + 1 - k; ++c)
                         {
                             if ((r <= row1 && row1 < r + k && c <= col1 && col1 < c + k) ||
                                 !Check_Valid(r + cnt, c + cnt, k - 1))
@@ -399,6 +407,220 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
              {
                  int dist_a = abs(a.pos.first - row2) + abs(a.pos.second - col2) + 2 * a.path.size();
                  int dist_b = abs(b.pos.first - row2) + abs(b.pos.second - col2) + 2 * b.path.size();
+                 return dist_a < dist_b;
+             });
+        if (next_beam.size() > static_cast<size_t>(beam_width))
+        {
+            next_beam.resize(beam_width);
+        }
+        current_beam = std::move(next_beam);
+        if (current_beam.empty())
+            break;
+    }
+
+    return {1000, {}};
+}
+
+ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid, 
+                                                int pr1, int pr2, int pc1, int pc2,
+                                                bool tl, bool bl, bool tr, bool br, bool is_vertical) {
+    if(DEBUG && false) {
+        cout << "Extending FREE PAIR!" << endl;
+        cout << "pr1=" << pr1 << ", pr2=" << pr2 << ", pc1=" << pc1 << ", pc2=" << pc2 << endl;
+        cout << "is_vertical=" << is_vertical << ", tl=" << tl << ", bl=" << bl << ", tr=" << tr << ", br=" << br << endl;
+    }
+    
+    pair<int, vector<Rotation>> temp;
+    struct ExtendedPair result;
+    result.cost = 1000;
+    int N = initial_grid.size();
+    
+    if(is_vertical) {
+        if(tl && pc1 - 1 >= 0) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr2, pc1 - 1, pr1, pc1 - 1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1 - 1, pr2, pc1};
+                result.path = temp.second;
+            }
+        }
+        if(bl && pc1 - 1 >= 0) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1, pc1 - 1, pr2, pc1 - 1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1 - 1, pr2, pc1};
+                result.path = temp.second;
+            }
+        }
+        if(tr && pc1 + 1 < N) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr2, pc1 + 1, pr1, pc1 + 1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1, pr2, pc1 + 1};
+                result.path = temp.second;
+            }
+        }
+        if(br && pc1 + 1 < N) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1, pc1 + 1, pr2, pc1 + 1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1, pr2, pc1 + 1};
+                result.path = temp.second;
+            }
+        }
+    } else {
+        if(tl && pr1 - 1 >= 0) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1 - 1, pc2, pr1 - 1, pc1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1 - 1, pc1, pr1, pc2};
+                result.path = temp.second;
+            }
+        }
+        if(bl && pr1 + 1 < N) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1 + 1, pc2, pr1 + 1, pc1, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1, pr1 + 1, pc2};
+                result.path = temp.second;
+            }
+        }
+        if(tr && pr1 - 1 >= 0) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1 - 1, pc1, pr1 - 1, pc2, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1 - 1, pc1, pr1, pc2};
+                result.path = temp.second;
+            }
+        }
+        if(br && pr1 + 1 < N) {
+            locked[pr1 + cnt][pc1 + cnt] = 1;
+            locked[pr2 + cnt][pc2 + cnt] = 1;
+            temp = search_pair(initial_grid, pr1 + 1, pc1, pr1 + 1, pc2, 
+                0, N - 1, 0, N - 1);
+            locked[pr1 + cnt][pc1 + cnt] = 0;
+            locked[pr2 + cnt][pc2 + cnt] = 0;
+            if(temp.first < result.cost) {
+                result.cost = temp.first;
+                result.position = {pr1, pc1, pr1 + 1, pc2};
+                result.path = temp.second;
+            }
+        }
+    }
+    
+    if(result.cost == 1000) {
+        result.position = {-1, -1, -1, -1};
+        result.path = {};
+        if(DEBUG) {
+           //cout << "Extend failed, cost=1000" << endl;
+        }
+    } else {
+        if(DEBUG) {
+            //cout << "Extend succeeded, cost=" << result.cost << endl;
+        }
+    }
+    
+    return result;
+}
+
+pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
+                                                    int tlr, int tlc, int brr, int brc,
+                                                    int target_r, int target_c) {
+    if(DEBUG) {
+        //cout << endl << "Moving Extended pair with cost: " << endl;
+    }
+    const int beam_width = 30;
+    const int max_depth = 5;
+    int N = initial_grid.size();
+    vector<State> current_beam = {{initial_grid, {}, {tlr, tlc}}}; //used top left row and top left column to track (make sure to move entire box though)
+    
+    for(int depth = 0; depth < max_depth; depth++) {
+        vector<State> next_beam;
+
+        for(const auto &cur : current_beam) {
+            if (target_r == cur.pos.first && target_c == cur.pos.second)
+            {
+                return {static_cast<int>(cur.path.size()), cur.path};
+            }
+        }
+
+#pragma omp parallel
+        {
+            vector<State> local_beam;
+
+#pragma omp for schedule(dynamic) nowait
+            for(int beam_idx = 0; beam_idx < current_beam.size(); beam_idx++) {
+                const auto &cur = current_beam[beam_idx];
+
+                for (int k = 2; k <= N - 1; ++k)
+                {
+                    for (int r = 0; r <= N - k; ++r)
+                    {
+                        for (int c = 0; c <= N - k; ++c)
+                        {
+                            if (!Check_Valid(r + cnt, c + cnt, k - 1))
+                                continue;
+                            
+                            bool affects = false;
+                            auto [c_tlr, c_tlc] = cur.pos;
+                            if (c_tlr >= r  && c_tlc >= c && c_tlr+1 < r + k && c_tlc+1 < c + k) affects = true; //check if the extended pair is in the rotation or not
+                            if (!affects) continue;
+                            vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
+                            
+                            vector<Rotation> new_path = cur.path;
+                            new_path.emplace_back(k, r, c);
+                            local_beam.push_back({new_grid, new_path, {r - c + cur.pos.second, r + c + k - 2 - cur.pos.first}});
+                        }
+                    }
+                }
+            }
+        
+#pragma omp critical 
+            {
+                next_beam.insert(next_beam.end(), local_beam.begin(), local_beam.end());
+            }
+        }
+
+        sort(next_beam.begin(), next_beam.end(),
+             [&](const State &a, const State &b)
+             {
+                 int dist_a = abs(a.pos.first - target_r) + abs(a.pos.second - target_c) + 2 * a.path.size();
+                 int dist_b = abs(b.pos.first - target_r) + abs(b.pos.second - target_c) + 2 * b.path.size();
                  return dist_a < dist_b;
              });
         if (next_beam.size() > static_cast<size_t>(beam_width))
@@ -452,13 +674,13 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
         }
     }
 
-    pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j);
+    pair<int, vector<Rotation>> temp_d = search_pair(grid, row, j, row + 1, j, 0, Fsize - 1, 0, Fsize - 1);
     if (temp_d.first < min_ops)
     {
         partial_result = temp_d.second;
         min_ops = temp_d.first;
     }
-    temp_d = search_pair(grid, row + 1, j, row, j);
+    temp_d = search_pair(grid, row + 1, j, row, j, 0, Fsize - 1, 0, Fsize - 1);
     if (temp_d.first < min_ops)
     {
         partial_result = temp_d.second;
@@ -514,14 +736,14 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
     //     if (min_ops <= 2)
     //         return {min_ops, partial_result};
     // }
-
-    for (int i = row+7; i > row ; i--)
+    int err = 0;
+    for (int step = Fsize/2 -4+j;step>=j;step--)
     {
-        for (int step = j + 7;step>=j;step--)
+        for (int i = min(row + Fsize - 3 - step, Fsize - 3); i > row; i--)
         {
-            auto [ops1, path1] = search_pair(grid, i, step+1, i, step);
+            auto [ops1, path1] = search_pair(grid, i, step+1, i, step, 0, Fsize - 1, 0, Fsize - 1);
             if(ops1 != 1){
-                auto [ops1t, path1t] = search_pair(grid, i, step, i, step + 1);
+                auto [ops1t, path1t] = search_pair(grid, i, step, i, step + 1, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops1t != 1)continue;
                 
                 ops1 = ops1t;
@@ -531,19 +753,21 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
             if(ops1 == 1)
             {
                 int k = i - row + step - j + 1, r = row - (step - j);
-                if (k > 12 || r < 0 || j + k >= Fsize)
-                    continue;
+                if (r < 0 || j + k >= Fsize){
+                    err++;
+                    cout<<'\n'<< k<<' '<< cnt + r <<' '<< cnt + j<<' ';
+                    continue;}
                 if (locked[r + cnt][j + cnt + k - 1] || locked[r + cnt + k - 1][j + cnt + k - 1])
                 {
-                    cout<<" ICE : "<<i<<' '<<step<<" CREAM ";
+                    err++;
                     continue;}
+                cout << " ERR: " << err << " ";
                 partial_result = path1;
                 partial_result.emplace_back(k, r, j);
                 return {2, partial_result};
             }
         }
     }
-
     return {min_ops, partial_result};
 }
 
@@ -569,7 +793,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             }
         }
 
-        auto [ops1, path1] = search_pair(grid, row, j, row, j + 1);
+        auto [ops1, path1] = search_pair(grid, row, j, row, j + 1, 0, Fsize - 1, 0, Fsize - 1);
 
         locked[cnt + row][cnt + j] = 1;
         locked[cnt + row][cnt + j + 1] = 1;
@@ -580,7 +804,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             path1 = temp_result;
         }
 
-        auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row + 1, j, row + 1, j + 1);
+        auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row + 1, j, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
         partial_result = path1;
         partial_result.insert(partial_result.end(), path2.begin(), path2.end());
 
@@ -602,7 +826,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             }
         }
 
-        auto [ops1, path1] = search_pair(grid, row + 1, j, row + 1, j + 1);
+        auto [ops1, path1] = search_pair(grid, row + 1, j, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
 
         locked[cnt + row + 1][cnt + j] = 1;
         locked[cnt + row + 1][cnt + j + 1] = 1;
@@ -613,7 +837,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             path1 = temp_result;
         }
 
-        auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row, j, row, j + 1);
+        auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row, j, row, j + 1, 0, Fsize - 1, 0, Fsize - 1);
         if (ops1 + ops2 < min_ops)
         {
             min_ops = ops1 + ops2;
@@ -624,10 +848,48 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         locked[cnt + row + 1][cnt + j] = 0;
         locked[cnt + row + 1][cnt + j + 1] = 0;
     }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    // First 3
+    {
+        auto [ops1, path1] = search_pair(grid, row, j, row + 1, j, 0, Fsize - 1, 0, Fsize - 1);
+        if (ops1 >= 2)
+        {
+            auto [ops1t, path1t] = search_pair(grid, row + 1, j, row, j, 0, Fsize - 1, 0, Fsize - 1);
+            if (ops1t < ops1)
+            {
+                ops1 = ops1t;
+                path1 = path1t;
+            }
+        }
+
+        locked[cnt + row][cnt + j] = 1;
+        locked[cnt + row + 1][cnt + j] = 1;
+
+        auto grid_temp = apply_rotations(grid, path1);
+        auto [ops2, path2] = search_pair(grid_temp, row, j + 1, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
+        if (ops2 >= 2)
+        {
+            auto [ops2t, path2t] = search_pair(grid_temp, row + 1, j + 1, row, j + 1, 0, Fsize - 1, 0, Fsize - 1);
+            if (ops2t < ops2)
+            {
+                ops2 = ops2t;
+                path2 = path2t;
+            }
+        }
+
+        if (ops1 + ops2 < min_ops)
+        {
+            min_ops = ops1 + ops2 + 1;
+            partial_result = path1;
+        }
+
+        locked[cnt + row][cnt + j] = 0;
+        locked[cnt + row + 1][cnt + j] = 0;
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    if (min_ops <= 2)
+    if (min_ops <= 3)
     {
         return {min_ops, partial_result};
     }
@@ -645,10 +907,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         for (int step = row + 1; step < Fsize - 3 + down; step++)
         {
 
-            auto [ops1, path1] = search_pair(grid, step, j, step + 1, j);
+            auto [ops1, path1] = search_pair(grid, step, j, step + 1, j, 0, Fsize - 1, 0, Fsize - 1);
             if (ops1 >= 2)
             {
-                auto [ops1t, path1t] = search_pair(grid, step + 1, j, step, j);
+                auto [ops1t, path1t] = search_pair(grid, step + 1, j, step, j, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops1t < ops1)
                 {
                     ops1 = ops1t;
@@ -660,10 +922,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             locked[cnt + step + 1][cnt + j] = 1;
 
             auto grid_temp = apply_rotations(grid, path1);
-            auto [ops2, path2] = search_pair(grid_temp, step, j + 1, step + 1, j + 1);
+            auto [ops2, path2] = search_pair(grid_temp, step, j + 1, step + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
             if (ops2 >= 2)
             {
-                auto [ops2t, path2t] = search_pair(grid_temp, step + 1, j + 1, step, j + 1);
+                auto [ops2t, path2t] = search_pair(grid_temp, step + 1, j + 1, step, j + 1, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops2t < ops2)
                 {
                     ops2 = ops2t;
@@ -690,10 +952,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         for (int step = row + 1; step < Fsize - 3 + down; step++)
         {
 
-            auto [ops1, path1] = search_pair(grid, step, j + 1, step + 1, j + 1);
+            auto [ops1, path1] = search_pair(grid, step, j + 1, step + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
             if (ops1 >= 2)
             {
-                auto [ops1t, path1t] = search_pair(grid, step + 1, j + 1, step, j + 1);
+                auto [ops1t, path1t] = search_pair(grid, step + 1, j + 1, step, j + 1, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops1t < ops1)
                 {
                     ops1 = ops1t;
@@ -704,10 +966,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             locked[cnt + step + 1][cnt + j + 1] = 1;
 
             auto grid_temp = apply_rotations(grid, path1);
-            auto [ops2, path2] = search_pair(grid_temp, step, j, step + 1, j);
+            auto [ops2, path2] = search_pair(grid_temp, step, j, step + 1, j, 0, Fsize - 1, 0, Fsize - 1);
             if (ops2 >= 2)
             {
-                auto [ops2t, path2t] = search_pair(grid_temp, step + 1, j, step, j);
+                auto [ops2t, path2t] = search_pair(grid_temp, step + 1, j, step, j, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops2t < ops2)
                 {
                     ops2 = ops2t;
@@ -740,10 +1002,10 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         for (int step = row + 1; step < Fsize - 3 + down; step++)
         {
 
-            auto [ops1, path1] = search_pair(grid, step + 1, j, step + 1, j + 1);
+            auto [ops1, path1] = search_pair(grid, step + 1, j, step + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
             if (ops1 >= 2)
             {
-                auto [ops1t, path1t] = search_pair(grid, step + 1, j + 1, step + 1, j);
+                auto [ops1t, path1t] = search_pair(grid, step + 1, j + 1, step + 1, j, 0, Fsize - 1, 0, Fsize - 1);
                 if (ops1t < ops1)
                 {
                     ops1 = ops1t;
@@ -753,7 +1015,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             locked[cnt + step + 1][cnt + j] = 1;
             locked[cnt + step + 1][cnt + j + 1] = 1;
 
-            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j, step, j + 1);
+            auto [ops2, path2] = search_pair(apply_rotations(grid, path1), step, j, step, j + 1, 0, Fsize - 1, 0, Fsize - 1);
 
             if (ops1 + ops2 + 1 < min_ops)
             {
@@ -781,6 +1043,96 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
     // }
 
     SET_FP = true;
+    if (SET_FP) {
+
+        for (const auto &[pr1, pc1, pr2, pc2, val] : free_pairs) {
+            bool is_upper = max(pr1,pr2) < (Fsize/2 - 2);
+            bool is_significant = !(locked[row + cnt][cnt + pc1] || locked[row + cnt][cnt + pc2] || locked[row + 1 + cnt][cnt + pc1] || locked[row + 1 + cnt][cnt + pc2]);
+            if(DEBUG) {
+                //cout << "Free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") is_significant: " << is_significant << endl;
+            }
+            
+            if(is_significant) {
+                if(DEBUG) {
+                    //cout << "Can be Extended" << endl;
+                }
+                bool is_vertical_pair = pc1 == pc2;
+                bool tl = true, bl = true, tr = true, br = true;
+                ExtendedPair extend_result;
+                if(is_vertical_pair) {
+                    tl = (pr1 >= 0 && pc1 - 1 >= 0 && 
+                        !locked[pr1 + cnt][pc1 - 1 + cnt] && 
+                        !locked[pr2 + cnt][pc1 - 1 + cnt]);
+                
+                    bl = (pr2 < Fsize  && pc1 - 1 >= 0 && 
+                        !locked[pr1 + cnt][pc1 - 1 + cnt] && 
+                        !locked[pr2 + cnt][pc1 - 1 + cnt]);
+                    
+                    tr = (pr1 >= 0 && pc1 + 1 < Fsize && 
+                        !locked[pr1 + cnt][pc1 + 1 + cnt] && 
+                        !locked[pr2 + cnt][pc1 + 1 + cnt]);
+                    
+                    br = (pr2 < Fsize  && pc1 + 1 < Fsize && 
+                        !locked[pr1 + cnt][pc1 + 1 + cnt] && 
+                        !locked[pr2 + cnt][pc1 + 1 + cnt]);
+                    
+                    if(tl || tr || bl || br) extend_result = extend_free_pair(grid, pr1, pr2, pc1, pc2, tl, bl, tr, br, true);
+                } else {
+                    tl = (pr1 - 1 >= 0 && pc1 >= 0 && 
+                        !locked[pr1 - 1 + cnt][pc1 + cnt] && 
+                        !locked[pr1 - 1 + cnt][pc2 + cnt]);
+                    
+                    tr = (pr1 - 1 >= 0 && pc2 < Fsize && 
+                        !locked[pr1 - 1 + cnt][pc1 + cnt] && 
+                        !locked[pr1 - 1 + cnt][pc2 + cnt]);
+                    
+                    bl = (pr1 + 1 < Fsize && pc1 >= 0 && 
+                        !locked[pr1 + 1 + cnt][pc1 + cnt] && 
+                        !locked[pr1 + 1 + cnt][pc2 + cnt]);
+                    
+                    br = (pr1 + 1 < Fsize && pc2 < Fsize && 
+                        !locked[pr1 + 1 + cnt][pc1 + cnt] && 
+                        !locked[pr1 + 1 + cnt][pc2 + cnt]);
+                    
+                    if(tl || tr || bl || br) extend_result = extend_free_pair(grid, pr1, pr2, pc1, pc2, tl, bl, tr, br, false);
+                }
+                
+                auto [tlr, tlc, brr, brc] = extend_result.position;
+                if(DEBUG) {
+                    //cout << tlr << " " << tlc << " " << brr << " " << brc << endl;
+                    cout << "EXT RES: " << extend_result.cost << " ";
+                }
+                if(tlr != -1 && tlc != -1 && brr != -1 && brc != -1) {
+                    pair<int, vector<Rotation>> move_extend_free_pair_result = move_extend_free_pair(apply_rotations(grid, extend_result.path), tlr, tlc, brr, brc, row, j);
+                    extend_result.path.insert(extend_result.path.end(), move_extend_free_pair_result.second.begin(), move_extend_free_pair_result.second.end());
+                    extend_result.cost += move_extend_free_pair_result.first;
+                    if (DEBUG)
+                    {
+                        //cout << move_extend_free_pair_result.first << endl;
+                    }
+
+                    if (extend_result.cost < min_ops)
+                    {
+                        partial_result = extend_result.path;
+                        min_ops =extend_result.cost;
+                        cout << "Using extend free pair (" << tlr << "," << tlc << ")-(" << brr << "," << brc << ") with cost " << min_ops << ". ";
+                        // if (move_extend_free_pair_result.first <= 2)
+                        // {
+                        //     return {min_ops, partial_result};
+                        // }
+                    }
+                }
+            } 
+
+            //auto move_result = move_free_pair_to_target(grid, pr1, pc1, pr2, pc2, row, j, true);
+            //if (move_result.first < min_ops)
+            //{
+            //    partial_result = move_result.second;
+            //    min_ops = move_result.first;
+            //    cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ") with cost " << min_ops << ". ";
+            //}
+        }
+    }
 
     return {min_ops, partial_result};
 }
