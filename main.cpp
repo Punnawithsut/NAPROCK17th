@@ -881,6 +881,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         {
             min_ops = ops1 + ops2 + 1;
             partial_result = path1;
+            partial_result.insert(partial_result.end(), path2.begin(), path2.end());
         }
 
         locked[cnt + row][cnt + j] = 0;
