@@ -27,6 +27,8 @@ bool broke = false;
 bool SET_FP = true;
 bool DEBUG = false;
 
+bool ext_pair = false;
+
 vector<vector<uint16_t>> get_random_board(int n)
 {
     json requestBody = {
@@ -881,6 +883,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
         {
             min_ops = ops1 + ops2 + 1;
             partial_result = path1;
+            partial_result.insert(partial_result.end(), path2.begin(), path2.end());
         }
 
         locked[cnt + row][cnt + j] = 0;
@@ -1120,6 +1123,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                         // {
                         //     return {min_ops, partial_result};
                         // }
+                        ext_pair = true;
                     }
                 }
             } 
@@ -1178,7 +1182,7 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
         locked[cnt + row + 1][cnt + j - 2] = 0;
         locked[cnt + row][cnt + j - 1] = 0;
         locked[cnt + row + 1][cnt + j - 1] = 0;
-
+        ext_pair = false;
         pair<int, vector<Rotation>> H_result = Horizontal_place(result[j - 2].first, Fsize, j - 2);
         int H_ops = dp[j - 2] + H_result.first;
         locked[cnt + row][cnt + j - 2] = 1;
@@ -1198,7 +1202,10 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
             {
                 result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
             }
-            cout << "H (f)cost : " << H_result.first << '\n';
+            cout << "H (f)cost : " << H_result.first; //<< '\n';
+            if(ext_pair) {
+                cout << "\tYEAHHHHH\t";
+            }
         }
         else
         {
@@ -1209,8 +1216,9 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
             {
                 result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
             }
-            cout << "V (f)cost : " << V_result.first << '\n';
+            cout << "V (f)cost : " << V_result.first; //<< '\n';
         }
+        cout << "\t" << result[j].second.size() << endl;
     }
 
     locked = rotate_submatrix_u8(locked, half, cnt, cnt);
