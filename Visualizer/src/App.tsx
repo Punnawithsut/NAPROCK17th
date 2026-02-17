@@ -24,6 +24,8 @@ function App() {
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [manualStep, setManualStep] = useState<string>('');
 
+  const [speed, setSpeed] = useState<number>(200);
+
   useEffect(() => {
     async function loadData() {
       try {
@@ -64,7 +66,7 @@ function App() {
             return prev;
           }
         });
-      }, 200)
+      }, speed)
     }
     return () => { clearInterval(timer) };
   }, [state, data])
@@ -146,6 +148,17 @@ function App() {
     }
   }
 
+  const handleSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSpeed(parseInt(e.target.value));
+  }
+
+  const handleManualSpeedSubmit = () => {
+    const cspeed = speed
+    if (!isNaN(cspeed) && cspeed >= 0) {
+      setSpeed(cspeed);
+    }
+  }
+
   return (
     <div className="container">
       <div className="step-counter">
@@ -164,6 +177,13 @@ function App() {
           onChange={handleManualStepChange}
         />
         <button onClick={handleManualStepSubmit}>Go</button>
+        <input 
+          type="number" 
+          placeholder="Enter step number"
+          value={speed}
+          onChange={handleSpeedChange}
+        />
+        <button onClick={handleManualSpeedSubmit}>Set</button>
       </div>
       <div className="board-container">
         {currBoard?.map((row, i) => (
