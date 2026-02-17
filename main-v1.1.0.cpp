@@ -1290,6 +1290,153 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
     return global_best.path;
 }
 
+
+//mid pair -> 3
+//right pair -> 2
+//left pair -> 1
+int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
+{
+    int half = Fsize / 2;
+    int mid_col = half - 2;   // the column STEP_Do row sits on
+    int score = 0;
+    int N = crop.size();
+
+    for (int i = 0; i < N; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            if (locked[cnt + i][cnt + j]) continue;
+
+            // Horizontal pair: (i,j)-(i,j+1)
+            if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && crop[i][j] == crop[i][j + 1])
+            {
+                int left_col = j;   // left cell of the pair
+                int w = (left_col >= mid_col - 1 && left_col <= mid_col + 1) ? 3
+                      : (left_col > mid_col)                                  ? 2
+                      :                                                          1;
+                score += w;
+            }
+            // Vertical pair: (i,j)-(i+1,j)
+            if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
+            {
+                int left_col = j;   // column of the pair
+                int w = (left_col >= mid_col - 1 && left_col <= mid_col + 1) ? 3
+                      : (left_col > mid_col)                                  ? 2
+                      :                                                          1;
+                score += w;
+            }
+        }
+    }
+    return score;
+}
+
+vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize)
+{
+    const int MAX_DEPTH   = 3;
+    const int BEAM_WIDTH  = 300;
+    int N = crop.size();   // = Fsize
+
+    cout << "[PreBeam] Starting on " << N << "x" << N
+         << " crop (cnt=" << cnt << ", Fsize=" << Fsize << ")\n";
+
+    struct CropState {
+        vector<vector<uint16_t>> grid;
+        vector<Rotation> path;   // local coords
+        int score;
+    };
+
+    auto make_score = [&](const vector<vector<uint16_t>> &g) {
+        return weighted_free_pairs(g, Fsize, 0);
+    };
+
+    int init_score = make_score(crop);
+    cout << "[PreBeam] Initial weighted free-pair score: " << init_score << "\n";
+
+    vector<CropState> beam = {{ crop, {}, init_score }};
+    vector<CropState> best_seen = beam;
+    int best_score = init_score;
+
+    for (int depth = 0; depth < MAX_DEPTH; depth++)
+    {
+        vector<CropState> next_beam;
+
+#pragma omp parallel
+        {
+            vector<CropState> local_next;
+
+#pragma omp for schedule(dynamic) nowait
+            for (int bi = 0; bi < (int)beam.size(); bi++)
+            {
+                const auto &cur = beam[bi];
+
+                for (int k = 2; k <= min(8, N - 1); k++)
+                {
+                    for (int r = 0; r <= N - k; r++)
+                    {
+                        for (int c = 0; c <= N - k; c++)
+                        {
+                            // Check validity using global locked coords
+                            if (!Check_Valid(r + cnt, c + cnt, k - 1)) continue;
+
+                            vector<vector<uint16_t>> new_grid =
+                                rotate_submatrix(cur.grid, k, r, c);
+                            int new_score = make_score(new_grid);
+
+                            vector<Rotation> new_path = cur.path;
+                            new_path.emplace_back(k, r, c);   // local coords
+
+                            local_next.push_back({ new_grid, new_path, new_score });
+                        }
+                    }
+                }
+            }
+
+#pragma omp critical
+            {
+                next_beam.insert(next_beam.end(), local_next.begin(), local_next.end());
+            }
+        }
+
+        if (next_beam.empty()) break;
+
+        // Sort by score descending
+        sort(next_beam.begin(), next_beam.end(),
+             [](const CropState &a, const CropState &b) { return a.score > b.score; });
+
+        // Trim to beam width
+        if ((int)next_beam.size() > BEAM_WIDTH)
+            next_beam.resize(BEAM_WIDTH);
+
+        beam = std::move(next_beam);
+
+        if (beam[0].score > best_score)
+        {
+            best_score = beam[0].score;
+            best_seen = { beam[0] };
+            cout << "[PreBeam] Depth " << depth + 1
+                 << ": improved score to " << best_score << "\n";
+        }
+        else
+        {
+            cout << "[PreBeam] Depth " << depth + 1
+                 << ": no improvement (best=" << best_score << ")\n";
+        }
+    }
+
+    // Pick the best state found
+    CropState &winner = best_seen[0];
+    cout << "[PreBeam] Done. Score: " << init_score << " -> " << winner.score
+         << " in " << winner.path.size() << " rotations\n";
+
+    // Translate local coords -> global coords
+    vector<Rotation> global_path;
+    global_path.reserve(winner.path.size());
+    for (auto &rot : winner.path)
+        global_path.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
+
+    return global_path;
+}
+
 // ─────────────────────────────────────────────────────────────
 //  main: File 1's outer loop + File 2's beam search integrated
 // ─────────────────────────────────────────────────────────────
@@ -1316,6 +1463,27 @@ int main()
         {
             vector<uint16_t> row(grid[i].begin() + cnt, grid[i].end() - cnt);
             crop.push_back(row);
+        }
+        //before step do
+        {
+            cout << "\n=== Pre-STEP_Do beam search (Fsize=" << Fsize << ") ===\n";
+            vector<Rotation> pre_path = pre_step_beam_search(crop, Fsize);
+
+            if (!pre_path.empty())
+            {
+                // Apply pre_path to the crop in LOCAL coords (strip cnt offset)
+                vector<Rotation> local_path;
+                local_path.reserve(pre_path.size());
+                for (const auto &rot : pre_path)
+                    local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
+                crop = apply_rotations(crop, local_path);
+
+                // Record in partial_path with GLOBAL coords (already offset by cnt)
+                // The outer loop will apply partial_path to grid and full_path together.
+                partial_path.insert(partial_path.end(), pre_path.begin(), pre_path.end());
+                cout << "[PreBeam] Applied " << pre_path.size() << " rotations\n";
+            }
+            cout << "==========================================\n\n";
         }
 
         pair<vector<vector<uint16_t>>, vector<Rotation>> res = STEP_Do(Fsize, crop, 0);
