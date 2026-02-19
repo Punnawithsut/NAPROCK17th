@@ -9,10 +9,6 @@ using namespace std;
 using namespace std::chrono;
 using json = nlohmann::json;
 
-// ─────────────────────────────────────────────────────────────
-//  Shared Data Structures
-// ─────────────────────────────────────────────────────────────
-
 struct Rotation
 {
     int k, i, j;
@@ -25,10 +21,6 @@ struct ExtendedPair {
     vector<Rotation> path;
 };
 
-// ─────────────────────────────────────────────────────────────
-//  Globals (File 1 style)
-// ─────────────────────────────────────────────────────────────
-
 vector<vector<uint8_t>> locked;
 int n;
 int cnt = 0;
@@ -37,10 +29,6 @@ bool broke = false;
 bool SET_FP = true;
 bool DEBUG = false;
 bool ext_pair = false;
-
-// ─────────────────────────────────────────────────────────────
-//  Beam Search State (File 2)
-// ─────────────────────────────────────────────────────────────
 
 struct GridState
 {
@@ -74,10 +62,6 @@ bool is_time_up()
     return elapsed.count() >= TIME_LIMIT;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  File 1: API board fetch (no fallback)
-// ─────────────────────────────────────────────────────────────
-
 vector<vector<uint16_t>> get_random_board(int n)
 {
     json requestBody = {
@@ -97,10 +81,6 @@ vector<vector<uint16_t>> get_random_board(int n)
 
     return board;
 }
-
-// ─────────────────────────────────────────────────────────────
-//  File 1: Save file
-// ─────────────────────────────────────────────────────────────
 
 void save_file(vector<vector<uint16_t>> &og, vector<Rotation> &fp)
 {
@@ -141,10 +121,6 @@ void save_file(vector<vector<uint16_t>> &og, vector<Rotation> &fp)
         cout << "Couldn't open file, save file failed" << endl;
     }
 }
-
-// ─────────────────────────────────────────────────────────────
-//  Shared: Grid utilities
-// ─────────────────────────────────────────────────────────────
 
 vector<vector<uint16_t>> rotate_submatrix(vector<vector<uint16_t>> grid, int k, int i, int j)
 {
@@ -230,15 +206,8 @@ int count_adjacent_pairs(const vector<vector<uint16_t>> &grid)
     return count;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  File 2: Paired-values counting and heuristic (uint16_t version)
-// ─────────────────────────────────────────────────────────────
-
 int count_paired_values(const vector<vector<uint16_t>> &grid)
 {
-    // Use actual max value in grid to size coords safely.
-    // The inner crop still holds original board values (0..full_board_max),
-    // so n*n/2 would be too small and cause OOB access.
     int rows = grid.size();
     int cols = grid.empty() ? 0 : grid[0].size();
     int max_val = 0;
@@ -297,10 +266,6 @@ bool is_solved(const vector<vector<uint16_t>> &grid)
     // Number of distinct values = rows*cols/2 (each value appears exactly twice)
     return count_paired_values(grid) == (rows * cols) / 2;
 }
-
-// ─────────────────────────────────────────────────────────────
-//  File 1: Search helpers
-// ─────────────────────────────────────────────────────────────
 
 bool Check_Valid(int i, int j, int k)
 {
@@ -478,10 +443,6 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
     return {1000, {}};
 }
 
-// ─────────────────────────────────────────────────────────────
-//  File 1: Extended pair logic
-// ─────────────────────────────────────────────────────────────
-
 ExtendedPair extend_free_pair(const vector<vector<uint16_t>> &initial_grid,
                               int pr1, int pr2, int pc1, int pc2,
                               bool tl, bool bl, bool tr, bool br, bool is_vertical)
@@ -603,10 +564,6 @@ pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>>
     }
     return {1000, {}};
 }
-
-// ─────────────────────────────────────────────────────────────
-//  File 1: Placement logic (Vertical / Horizontal)
-// ─────────────────────────────────────────────────────────────
 
 pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fsize, int j)
 {
@@ -872,10 +829,6 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
     return {min_ops, partial_result};
 }
 
-// ─────────────────────────────────────────────────────────────
-//  File 1: STEP_Do
-// ─────────────────────────────────────────────────────────────
-
 pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode)
 {
     int half = Fsize / 2;
@@ -1043,7 +996,7 @@ vector<GridState> unstuck_healing(const GridState &stuck_state, int num_random_m
 // Returns rotations in GLOBAL coordinates (i += offset, j += offset).
 vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int offset, int max_depth)
 {
-    int inner_n = inner_grid.size();              // e.g. 12 for a 24-board after 3 STEP_Do passes
+    int inner_n = inner_grid.size();
     int target_paired = inner_n * inner_n / 2;
 
     int initial_paired   = count_paired_values(inner_grid);
@@ -1290,20 +1243,10 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
     return global_best.path;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Pre-STEP_Do beam search: maximize weighted free pairs in crop
-//
-//  Runs a 3-depth beam search on the current crop before STEP_Do.
-//  Scores states by a weighted free-pair count:
-//    - Pairs whose left cell column is near the crop's middle (col ~ Fsize/2-2):  weight 3
-//    - Pairs whose left cell column is to the right of middle:                     weight 2
-//    - Pairs whose left cell column is to the left of middle:                      weight 1
-//  Returns rotations in GLOBAL coordinates (already offset by cnt).
-// ─────────────────────────────────────────────────────────────
-
 int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
 {
     // 7-tier priority scoring for free pairs based on position:
+    // Weight 10: SQUARE BOX - four cells forming a 2x2 square with matching values
     // Weight 7: middle rows (n/2-1, n/2) - STEP_Do's target rows
     // Weight 6: lower rows + center columns
     // Weight 5: lower rows + right columns
@@ -1352,6 +1295,26 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
         return 1;
     };
 
+    // First pass: detect 2x2 square boxes (weight 10)
+    for (int i = 0; i < N - 1; i++)
+    {
+        for (int j = 0; j < N - 1; j++)
+        {
+            // Check if all 4 corners are unlocked
+            if (locked[cnt + i][cnt + j] || locked[cnt + i][cnt + j + 1] ||
+                locked[cnt + i + 1][cnt + j] || locked[cnt + i + 1][cnt + j + 1])
+                continue;
+
+            // Check if all 4 cells have the same value (forming a square box)
+            uint16_t val = crop[i][j];
+            if (crop[i][j + 1] == val && crop[i + 1][j] == val && crop[i + 1][j + 1] == val)
+            {
+                score += 10;  // Square box found! Highest priority
+            }
+        }
+    }
+
+    // Second pass: count regular pairs with positional weights
     for (int i = 0; i < N; i++)
     {
         for (int j = 0; j < N; j++)
@@ -1490,10 +1453,6 @@ vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int 
     return global_path;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  main: File 1's outer loop + File 2's beam search integrated
-// ─────────────────────────────────────────────────────────────
-
 int main()
 {
     omp_set_num_threads(omp_get_max_threads());
@@ -1518,30 +1477,28 @@ int main()
             crop.push_back(row);
         }
 
-        // ── Pre-STEP_Do beam search: maximise weighted free pairs ──
-        // Runs before every STEP_Do iteration (Fsize=24, 20, 16) to
-        // rearrange the crop so STEP_Do has more free pairs to exploit.
+        // ── Beam search BEFORE first STEP_Do (corner 0) ──
         {
-            cout << "\n=== Pre-STEP_Do beam search (Fsize=" << Fsize << ") ===\n";
+            cout << "\n=== Beam search before corner 1 (Fsize=" << Fsize << ") ===\n";
             vector<Rotation> pre_path = pre_step_beam_search(crop, Fsize);
 
             if (!pre_path.empty())
             {
-                // Apply pre_path to the crop in LOCAL coords (strip cnt offset)
+                // Apply to crop in LOCAL coords
                 vector<Rotation> local_path;
                 local_path.reserve(pre_path.size());
                 for (const auto &rot : pre_path)
                     local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
                 crop = apply_rotations(crop, local_path);
 
-                // Record in partial_path with GLOBAL coords (already offset by cnt)
-                // The outer loop will apply partial_path to grid and full_path together.
+                // Record in partial_path with GLOBAL coords
                 partial_path.insert(partial_path.end(), pre_path.begin(), pre_path.end());
-                cout << "[PreBeam] Applied " << pre_path.size() << " rotations\n";
+                cout << "[BeforeCorner1Beam] Applied " << pre_path.size() << " rotations\n";
             }
             cout << "==========================================\n\n";
         }
 
+        // First STEP_Do call (corner 1, part 1)
         pair<vector<vector<uint16_t>>, vector<Rotation>> res = STEP_Do(Fsize, crop, 0);
         partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
 
@@ -1549,10 +1506,33 @@ int main()
         locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
         partial_path.emplace_back(Fsize, cnt, cnt);
 
+        // Loop through remaining corners (4 corners total, we already did the first STEP_Do)
         for (int i = 0; i < 3; i++)
         {
+            // Second STEP_Do of this corner pair (completes one corner)
             auto res1 = STEP_Do(Fsize, crop, 0);
             partial_path.insert(partial_path.end(), res1.second.begin(), res1.second.end());
+
+            // ── Beam search after completing a corner (every 2 STEP_Do calls) ──
+            {
+                cout << "\n=== Beam search after corner " << (i + 1) << " (Fsize=" << Fsize << ") ===\n";
+                vector<Rotation> pre_path = pre_step_beam_search(res1.first, Fsize);
+
+                if (!pre_path.empty())
+                {
+                    // Apply to crop in LOCAL coords
+                    vector<Rotation> local_path;
+                    local_path.reserve(pre_path.size());
+                    for (const auto &rot : pre_path)
+                        local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
+                    res1.first = apply_rotations(res1.first, local_path);
+
+                    // Record in partial_path with GLOBAL coords
+                    partial_path.insert(partial_path.end(), pre_path.begin(), pre_path.end());
+                    cout << "[PostCornerBeam] Applied " << pre_path.size() << " rotations\n";
+                }
+                cout << "==========================================\n\n";
+            }
 
             auto res2 = STEP_Do(Fsize, res1.first, 2);
             partial_path.insert(partial_path.end(), res2.second.begin(), res2.second.end());
