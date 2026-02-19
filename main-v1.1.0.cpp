@@ -65,7 +65,7 @@ struct StateSnapshot {
 };
 
 auto start_time = high_resolution_clock::now();
-const double TIME_LIMIT = 125.0;
+const double TIME_LIMIT = 270.0;
 
 bool is_time_up()
 {
@@ -1290,39 +1290,91 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
     return global_best.path;
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Pre-STEP_Do beam search: maximize weighted free pairs in crop
+//
+//  Runs a 3-depth beam search on the current crop before STEP_Do.
+//  Scores states by a weighted free-pair count:
+//    - Pairs whose left cell column is near the crop's middle (col ~ Fsize/2-2):  weight 3
+//    - Pairs whose left cell column is to the right of middle:                     weight 2
+//    - Pairs whose left cell column is to the left of middle:                      weight 1
+//  Returns rotations in GLOBAL coordinates (already offset by cnt).
+// ─────────────────────────────────────────────────────────────
 
-//mid pair -> 3
-//right pair -> 2
-//left pair -> 1
 int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
 {
-    int half = Fsize / 2;
-    int mid_col = half - 2;   // the column STEP_Do row sits on
-    int score = 0;
+    // 7-tier priority scoring for free pairs based on position:
+    // Weight 7: middle rows (n/2-1, n/2) - STEP_Do's target rows
+    // Weight 6: lower rows + center columns
+    // Weight 5: lower rows + right columns
+    // Weight 4: lower rows + left columns
+    // Weight 3: upper rows + center columns
+    // Weight 2: upper rows + right columns
+    // Weight 1: upper rows + left columns
+    
     int N = crop.size();
+    int half = N / 2;
+    int mid_row_start = half - 1;  // n/2 - 1
+    int mid_row_end   = half;      // n/2
+    int score = 0;
+
+    auto get_weight = [&](int row, int col) -> int {
+        // Check if in middle rows
+        bool in_mid_rows = (row == mid_row_start || row == mid_row_end);
+        
+        // Check if upper or lower
+        bool is_upper = (row < mid_row_start);
+        bool is_lower = (row > mid_row_end);
+        
+        // Check column zones
+        bool is_center = (col >= half - 2 && col <= half + 1);
+        bool is_right  = (col > half + 1);
+        bool is_left   = (col < half - 2);
+        
+        // Priority 1 (weight 7): middle rows
+        if (in_mid_rows) return 7;
+        
+        // Lower rows
+        if (is_lower) {
+            if (is_center) return 6;  // Priority 2
+            if (is_right)  return 5;  // Priority 3
+            if (is_left)   return 4;  // Priority 4
+        }
+        
+        // Upper rows
+        if (is_upper) {
+            if (is_center) return 3;  // Priority 5
+            if (is_right)  return 2;  // Priority 6
+            if (is_left)   return 1;  // Priority 7
+        }
+        
+        // Default (should not reach here)
+        return 1;
+    };
 
     for (int i = 0; i < N; i++)
     {
         for (int j = 0; j < N; j++)
         {
+            // Skip locked cells (translate to global coords using global cnt)
             if (locked[cnt + i][cnt + j]) continue;
 
             // Horizontal pair: (i,j)-(i,j+1)
             if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && crop[i][j] == crop[i][j + 1])
             {
-                int left_col = j;   // left cell of the pair
-                int w = (left_col >= mid_col - 1 && left_col <= mid_col + 1) ? 3
-                      : (left_col > mid_col)                                  ? 2
-                      :                                                          1;
+                // For horizontal pairs, use the row and leftmost column
+                int w = get_weight(i, j);
                 score += w;
             }
+            
             // Vertical pair: (i,j)-(i+1,j)
             if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
             {
-                int left_col = j;   // column of the pair
-                int w = (left_col >= mid_col - 1 && left_col <= mid_col + 1) ? 3
-                      : (left_col > mid_col)                                  ? 2
-                      :                                                          1;
+                // For vertical pairs, use the topmost row and column
+                // Average the weights of both cells since the pair spans two rows
+                int w1 = get_weight(i, j);
+                int w2 = get_weight(i + 1, j);
+                int w = (w1 + w2 + 1) / 2;  // Round up
                 score += w;
             }
         }
@@ -1330,10 +1382,11 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
     return score;
 }
 
+// Returns rotations in GLOBAL coordinates (i += cnt, j += cnt already applied).
 vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize)
 {
     const int MAX_DEPTH   = 3;
-    const int BEAM_WIDTH  = 300;
+    const int BEAM_WIDTH  = 200;
     int N = crop.size();   // = Fsize
 
     cout << "[PreBeam] Starting on " << N << "x" << N
@@ -1464,7 +1517,10 @@ int main()
             vector<uint16_t> row(grid[i].begin() + cnt, grid[i].end() - cnt);
             crop.push_back(row);
         }
-        //before step do
+
+        // ── Pre-STEP_Do beam search: maximise weighted free pairs ──
+        // Runs before every STEP_Do iteration (Fsize=24, 20, 16) to
+        // rearrange the crop so STEP_Do has more free pairs to exploit.
         {
             cout << "\n=== Pre-STEP_Do beam search (Fsize=" << Fsize << ") ===\n";
             vector<Rotation> pre_path = pre_step_beam_search(crop, Fsize);
