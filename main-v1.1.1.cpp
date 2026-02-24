@@ -717,6 +717,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
                     continue;
                 if (locked[r + cnt][j + cnt + k - 1] || locked[r + cnt + k - 1][j + cnt + k - 1])
                     continue;
+                partial_result.clear();
                 partial_result.emplace_back(k, r, j);
                 cout << "Using free pair (" << pr1 << "," << pc1 << ")-(" << pr2 << "," << pc2 << ")";
                 return {1, partial_result};
@@ -724,7 +725,7 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
         }
     }
 
-    for (int step = j; j <= Fsize / 2 - 4 + j; step++)
+    for (int step = j; step <= Fsize / 2 - 4 + j; step++)
     {
         for (int i = row + 1; i <= min(row + Fsize - 3 - step, Fsize - 3); i++)
         {
@@ -740,13 +741,17 @@ pair<int, vector<Rotation>> Vertical_place(vector<vector<uint16_t>> grid, int Fs
             if (ops1 == 1)
             {
                 int k = i - row + step - j + 1, r = row - (step - j);
-
+                if (r < 0 || j + k >= Fsize)
+                {
+                    continue;
+                }
                 if (locked[r + cnt][j + cnt + k - 1] || locked[r + cnt + k - 1][j + cnt + k - 1])
                 {
                     continue;
                 }
                 partial_result = path1;
                 partial_result.emplace_back(k, r, j);
+
                 return {2, partial_result};
             }
         }
@@ -1076,9 +1081,9 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
         bool is_lower = (row >= mid_row_end);
 
         // Check column zones
-        bool is_center = (col >= half - 2 && col <= half + 1);
-        bool is_right = (col >= half);
-        bool is_left = (col < half);
+        bool is_center = (col >= half - 2 + local_cnt && col <= half + 1 + local_cnt);
+        bool is_right = (col >= half + local_cnt);
+        bool is_left = (col < half + local_cnt);
 
         if (mode)
         {
@@ -1149,7 +1154,9 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
                 continue;
             if (auto search = sr.find(crop[i][j]); search != sr.end())
             {
-                score += 2;
+                pair<int, int> pos = find_pos(crop, i, j);
+                if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
+                    score += 2;
             }
             else
             {
@@ -1243,7 +1250,7 @@ vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int 
                 {
                     for (int r = 0; r <= N - k; r++)
                     {
-                        for (int c = PD; c <= N - k; c++)
+                        for (int c = 0; c <= N - k; c++)
                         {
                             // Check validity using global locked coords
                             if (!Check_Valid(r + cnt, c + cnt, k - 1))
@@ -1386,27 +1393,27 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
                 result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
             cout << "V (f)cost : " << V_r.first;
         }
-        if ((mode + half) / 2 == j)
-        {
-            cout << "\n=== Beam search prep (Fsize=" << Fsize << ") ===\n";
-            pre_path = pre_step_beam_search(result[j].first, Fsize, j);
-            {
+        // if ((mode + half) / 2 == j)
+        // {
+        //     cout << "\n=== Beam search prep (Fsize=" << Fsize << ") ===\n";
+        //     pre_path = pre_step_beam_search(result[j].first, Fsize, j);
+        //     {
 
-                if (!pre_path.empty())
-                {
-                    // Apply to crop in LOCAL coords
-                    vector<Rotation> local_path;
-                    local_path.reserve(pre_path.size());
-                    for (const auto &rot : pre_path)
-                        local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
-                    result[j].first = apply_rotations(result[j].first, local_path);
-                    result[j].second.insert(result[j].second.end(), pre_path.begin(), pre_path.end());
-                    // Record in partial_path with GLOBAL coords
-                    cout << " Applied " << pre_path.size() << " rotations\n";
-                }
-                cout << "==========================================\n\n";
-            }
-        }
+        //         if (!pre_path.empty())
+        //         {
+        //             // Apply to crop in LOCAL coords
+        //             vector<Rotation> local_path;
+        //             local_path.reserve(pre_path.size());
+        //             for (const auto &rot : pre_path)
+        //                 local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
+        //             result[j].first = apply_rotations(result[j].first, local_path);
+        //             result[j].second.insert(result[j].second.end(), pre_path.begin(), pre_path.end());
+        //             // Record in partial_path with GLOBAL coords
+        //             cout << " Applied " << pre_path.size() << " rotations\n";
+        //         }
+        //         cout << "==========================================\n\n";
+        //     }
+        // }
         cout << '\n';
     }
 
@@ -1881,7 +1888,6 @@ int main()
             crop.push_back(row);
         }
 
-
         // First STEP_Do call (corner 1, part 1)
         pair<vector<vector<uint16_t>>, vector<Rotation>> res = STEP_Do(Fsize, crop, 0);
         partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
@@ -1897,8 +1903,6 @@ int main()
             // Second STEP_Do of this corner pair (completes one corner)
             auto res1 = STEP_Do(Fsize, crop, 0);
             partial_path.insert(partial_path.end(), res1.second.begin(), res1.second.end());
-
-
 
             auto res2 = STEP_Do(Fsize, res1.first, 2);
             partial_path.insert(partial_path.end(), res2.second.begin(), res2.second.end());
