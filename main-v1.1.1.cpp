@@ -1146,9 +1146,9 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
 
     set<int> sr;
     // First pass: check if there are same number in given area (weight 10)
-    for (int i = mid_row_start; i < N - 1; i++)
+    for (int i = mid_row_start; i <= N - 1; i++)
     {
-        for (int j = local_cnt; j < min(N - 1, local_cnt + Fsize / 4); j++)
+        for (int j = local_cnt; j <= min(N - 1, local_cnt + Fsize / 2); j++)
         {
             if (locked[cnt + i][cnt + j])
                 continue;
