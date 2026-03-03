@@ -337,7 +337,7 @@ pair<int, vector<Rotation>> move_free_pair_to_target(const vector<vector<uint16_
                                                      int pr1, int pc1, int pr2, int pc2,
                                                      int target_r, int target_c, bool is_vertical)
 {
-    const int beam_width = 30;
+    const int beam_width = 20;
     const int max_depth = 2;
     int N = initial_grid.size();
     vector<State> current_beam = {{initial_grid, {}, {pr1, pc1}}};
@@ -413,7 +413,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
                                         int mnr, int mxr, int mnc, int mxc)
 {
     const int beam_width = 30 + cnt * 5;
-    const int max_depth = 5;
+    const int max_depth = 3;
     int N = initial_grid.size();
 
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
@@ -615,8 +615,8 @@ pair<int, vector<Rotation>> move_extend_free_pair(const vector<vector<uint16_t>>
                                                   int tlr, int tlc, int brr, int brc,
                                                   int target_r, int target_c)
 {
-    const int beam_width = 30;
-    const int max_depth = 5;
+    const int beam_width = 20;
+    const int max_depth = 3;
     int N = initial_grid.size();
     vector<State> current_beam = {{initial_grid, {}, {tlr, tlc}}};
 
@@ -852,8 +852,12 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             path1 = temp_result;
         }
         auto [ops2, path2] = search_pair(apply_rotations(grid, path1), row + 1, j, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
-        partial_result = path1;
-        partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+        if(ops1 + ops2 < min_ops) {
+            min_ops = ops1 + ops2;
+            partial_result = path1;
+            partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+            ext_pair = false;
+        }
         locked[cnt + row][cnt + j] = 0;
         locked[cnt + row][cnt + j + 1] = 0;
         min_ops = ops1 + ops2;
@@ -887,49 +891,12 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
             min_ops = ops1 + ops2;
             partial_result = path1;
             partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+            ext_pair = false;
         }
         locked[cnt + row + 1][cnt + j] = 0;
         locked[cnt + row + 1][cnt + j + 1] = 0;
     }
     if (min_ops <= 2)
-        return {min_ops, partial_result};
-
-    // First 3
-    {
-        auto [ops1, path1] = search_pair(grid, row, j, row + 1, j, 0, Fsize - 1, 0, Fsize - 1);
-        if (ops1 >= 2)
-        {
-            auto [ops1t, path1t] = search_pair(grid, row + 1, j, row, j, 0, Fsize - 1, 0, Fsize - 1);
-            if (ops1t < ops1)
-            {
-                ops1 = ops1t;
-                path1 = path1t;
-            }
-        }
-        locked[cnt + row][cnt + j] = 1;
-        locked[cnt + row + 1][cnt + j] = 1;
-        auto grid_temp = apply_rotations(grid, path1);
-        auto [ops2, path2] = search_pair(grid_temp, row, j + 1, row + 1, j + 1, 0, Fsize - 1, 0, Fsize - 1);
-        if (ops2 >= 2)
-        {
-            auto [ops2t, path2t] = search_pair(grid_temp, row + 1, j + 1, row, j + 1, 0, Fsize - 1, 0, Fsize - 1);
-            if (ops2t < ops2)
-            {
-                ops2 = ops2t;
-                path2 = path2t;
-            }
-        }
-        if (ops1 + ops2 < min_ops)
-        {
-            min_ops = ops1 + ops2;
-            partial_result = path1;
-            partial_result.insert(partial_result.end(), path2.begin(), path2.end());
-        }
-        locked[cnt + row][cnt + j] = 0;
-        locked[cnt + row + 1][cnt + j] = 0;
-    }
-
-    if (min_ops <= 3)
         return {min_ops, partial_result};
 
     int up = (!locked[cnt][cnt + Fsize / 2]) * 2,
@@ -971,6 +938,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 partial_result = path1;
                 partial_result.insert(partial_result.end(), path2.begin(), path2.end());
                 partial_result.emplace_back(step - row + 2, row, j);
+                ext_pair = false;
             }
             locked[cnt + step][cnt + j] = 0;
             locked[cnt + step + 1][cnt + j] = 0;
@@ -1011,6 +979,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 partial_result = path1;
                 partial_result.insert(partial_result.end(), path2.begin(), path2.end());
                 partial_result.emplace_back(step - row + 2, row, j);
+                ext_pair = false;
             }
             locked[cnt + step][cnt + j + 1] = 0;
             locked[cnt + step + 1][cnt + j + 1] = 0;
@@ -1047,10 +1016,33 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
                 partial_result = path1;
                 partial_result.insert(partial_result.end(), path2.begin(), path2.end());
                 partial_result.emplace_back(step - row + 2, row, j);
+                ext_pair = false;
             }
             locked[cnt + step + 1][cnt + j] = 0;
             locked[cnt + step + 1][cnt + j + 1] = 0;
         }
+    }
+    if (min_ops <= 3)
+        return {min_ops, partial_result};
+
+    // First 3
+    {
+        auto [ops1, path1] = Vertical_place(grid, Fsize, j);
+
+        locked[cnt + row][cnt + j] = 1;
+        locked[cnt + row + 1][cnt + j] = 1;
+        auto grid_temp = apply_rotations(grid, path1);
+        auto [ops2, path2] = Vertical_place(grid_temp, Fsize, j + 1);
+
+        if (ops1 + ops2 < min_ops)
+        {
+            min_ops = ops1 + ops2;
+            partial_result = path1;
+            partial_result.insert(partial_result.end(), path2.begin(), path2.end());
+            ext_pair = false;
+        }
+        locked[cnt + row][cnt + j] = 0;
+        locked[cnt + row + 1][cnt + j] = 0;
     }
 
     SET_FP = true;
@@ -1060,16 +1052,6 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
 int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
 {
-    // 7-tier priority scoring for free pairs based on position:
-    // Weight 10: SQUARE BOX - four cells forming a 2x2 square with matching values
-    // Weight 7: middle rows (n/2-1, n/2) - STEP_Do's target rows
-    // Weight 6: lower rows + center columns
-    // Weight 5: lower rows + right columns
-    // Weight 4: lower rows + left columns
-    // Weight 3: upper rows + center columns
-    // Weight 2: upper rows + right columns
-    // Weight 1: upper rows + left columns
-
     int N = crop.size();
     int half = N / 2;
     int mid_row_start = half - 2; // n/2 - 1
@@ -1094,31 +1076,36 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
         {
             // Priority 1 : middle rows
             if (row == mid_row_start)
-                return 5;
+                return 6;
 
-            // Lower rows
-            if (is_lower)
-            {
-                if (is_center)
-                    return 3; // Priority 2
-                if (is_right)
-                    return 1; // Priority 3
-                if (is_left)
-                    return 3; // Priority 4
-            }
+            // // Lower rows
+            // if (is_lower)
+            // {
+            //     if (is_center)
+            //         return 4; // Priority 2
+            //     if (is_right)
+            //         return 1; // Priority 3
+            //     if (is_left)
+            //         return 4; // Priority 4
+            // }
 
-            // Upper rows
-            if (is_upper)
+            // // Upper rows
+            // if (is_upper)
+            // {
+            //     if (mid_row_start - 1 == row)
+            //     {
+            //         return 3;
+            //     }
+            //     else
+            //     {
+            //         return 1;
+            //     }
+            // }
+            if (mid_row_start - 1 == row)
             {
-                if (mid_row_start - 1 == row)
-                {
-                    return 3;
-                }
-                else
-                {
-                    return 1;
-                }
+                return 6;
             }
+            return 1;
         }
         else
         {
@@ -1126,22 +1113,22 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
             // Horizontal
 
             if (row == mid_row_end)
-                return 7;
+                return 6;
             // Lower rows
             if (is_lower)
             {
                 if (is_center)
-                    return 8; // Priority 2
+                    return 8; 
                 if (is_right)
-                    return 4; // Priority 3
+                    return 3; 
                 if (is_left)
-                    return 8; // Priority 4
+                    return 8; 
             }
 
             // Upper rows
             if (is_upper)
             {
-                return 1; // Priority 7
+                return 1; 
             }
         }
 
@@ -1150,25 +1137,26 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
     };
 
     set<int> sr;
-    // First pass: check if there are same number in given area (weight 10)
-    for (int i = mid_row_start; i < N - 1; i++)
-    {
-        for (int j = local_cnt; j < min(N - 1, local_cnt + Fsize / 4); j++)
-        {
-            if (locked[cnt + i][cnt + j])
-                continue;
-            if (auto search = sr.find(crop[i][j]); search != sr.end())
-            {
-                pair<int, int> pos = find_pos(crop, i, j);
-                if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
-                    score += 2;
-            }
-            else
-            {
-                sr.insert(crop[i][j]);
-            }
-        }
-    }
+    // First pass: check if there are same number in given area (weight 1)
+    // for (int j = local_cnt; j < min(N , local_cnt + Fsize / 3); j++)
+    // {
+    //     for (int i = mid_row_start; i < N ; i++)
+    //     {
+    //         if (locked[cnt + i][cnt + j])
+    //             continue;
+    //         if (auto search = sr.find(crop[i][j]); search != sr.end())
+    //         {
+    //             pair<int, int> pos = find_pos(crop, i, j);
+    //             if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
+    //                 score += 1;
+    //         }
+    //         else
+    //         {
+    //             if (j == local_cnt || j == local_cnt + 1)
+    //                 sr.insert(crop[i][j]);
+    //         }
+    //     }
+    // }
 
     // Second pass: count regular pairs with positional weights
     for (int j = local_cnt; j < N; j++)
@@ -1184,6 +1172,13 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
             {
                 // For horizontal pairs, use the row and leftmost column
                 int w = get_weight(i, j, 0);
+                // int cof = 1;
+                // if(j == local_cnt)cof =4;
+                // if (j == local_cnt+1)
+                //     cof = 2;
+                // if (j == local_cnt+2)
+                //     cof = 2;
+
                 score += w;
                 break;
             }
@@ -1194,15 +1189,16 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
         for (int j = local_cnt; j < N; j++)
         {
             // Skip locked cells (translate to global coords using global cnt)
-            if (locked[cnt + i][cnt + j])
+            if (locked[cnt + i][cnt + j]||(j==local_cnt&&i ==mid_row_start - 1))
                 continue;
 
             // Vertical pair: (i,j)-(i+1,j)
             if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
             {
-                int w1 = get_weight(i, j, 1);
+                int w = get_weight(i, j, 1);
 
-                score += w1;
+                if(j==local_cnt&&i==mid_row_start)score+=18;
+                score += w;
             }
         }
     }
@@ -1213,7 +1209,7 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
 vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize, int PD = 0)
 {
     const int MAX_DEPTH = (Fsize + 7) / 8;
-    const int BEAM_WIDTH = 1200;
+    const int BEAM_WIDTH = 300;
     int N = crop.size(); // = Fsize
 
     cout << "[PreBeam] Starting on " << N << "x" << N
@@ -1544,7 +1540,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
     int initial_paired = count_paired_values(inner_grid);
     int initial_heuristic = calculate_manhattan_heuristic(inner_grid);
 
-    int base_beam_width = max(1, 184320 / (inner_n * inner_n));
+    int base_beam_width = 1800;
     double beam_multiplier = 1.0;
 
     int num_threads = omp_get_max_threads();
@@ -1621,7 +1617,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 }
 
                 // Only rotate within the inner block (k up to inner_n)
-                for (int k = 2; k <= min(8, inner_n); ++k)
+                for (int k = 2; k <= inner_n - 1; ++k)
                 {
                     if (solution_found)
                         break;
@@ -1840,8 +1836,11 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 stuck_counter = 0;
             }
         }
-
-        int current_beam_width = (int)(base_beam_width * beam_multiplier);
+        int desired_beam_width = base_beam_width;
+        if(depth < 40) {
+            desired_beam_width -= 1000;
+        }
+        int current_beam_width = (int)(desired_beam_width * beam_multiplier);
         beam = priority_queue<GridState>();
         int kept = 0;
         while (!next_beam.empty() && kept < current_beam_width)
@@ -1885,7 +1884,7 @@ int main()
     vector<Rotation> full_path;
 
     // ── Phase 1: File 1's frame-by-frame STEP_Do solver ──
-    for (int Fsize = n - cnt * 2; Fsize > n / 2; Fsize -= 4)
+    for (int Fsize = n - cnt * 2; Fsize > 12; Fsize -= 4)
     {
         vector<vector<uint16_t>> crop;
         vector<Rotation> partial_path;
