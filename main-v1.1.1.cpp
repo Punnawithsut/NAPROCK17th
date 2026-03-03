@@ -1537,7 +1537,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
     int initial_paired = count_paired_values(inner_grid);
     int initial_heuristic = calculate_manhattan_heuristic(inner_grid);
 
-    int base_beam_width = max(1, 184320 / (inner_n * inner_n));
+    int base_beam_width = 2000;
     double beam_multiplier = 1.0;
 
     int num_threads = omp_get_max_threads();
@@ -1831,8 +1831,11 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 stuck_counter = 0;
             }
         }
-
-        int current_beam_width = (int)(base_beam_width * beam_multiplier);
+        int dbw = base_beam_width;
+        if(depth < 40) {
+            dbw -= 1500;
+        }
+        int current_beam_width = (int)(dbw * beam_multiplier);
         beam = priority_queue<GridState>();
         int kept = 0;
         while (!next_beam.empty() && kept < current_beam_width)
@@ -1959,7 +1962,6 @@ int main()
 
         if (inner_paired < inner_target)
         {
-            start_time = high_resolution_clock::now();
             int max_search_depth = inner_n * inner_n * 2;
 
             // beam_search returns rotations already in GLOBAL coordinates
@@ -1994,6 +1996,9 @@ int main()
     print_grid(init_grid);
     cout << "\nTotal ops: " << full_path.size() << "\n";
     cout << "Solved: " << (is_solved(init_grid) ? "YES" : "NO") << "\n";
+    auto end_time = high_resolution_clock::now();
+    duration<double> elapsed = end_time - start_time;
+    cout << "Total time used: " << elapsed.count() << " seconds\n"; 
 
     if (broke)
         cout << "-------------------------------------BROKE----------------------------------\n";

@@ -413,7 +413,7 @@ pair<int, vector<Rotation>> search_pair(const vector<vector<uint16_t>> &initial_
                                         int mnr, int mxr, int mnc, int mxc)
 {
     const int beam_width = 30 + cnt * 5;
-    const int max_depth = 3;
+    const int max_depth = 4;
     int N = initial_grid.size();
 
     vector<State> current_beam = {{initial_grid, {}, find_pos(initial_grid, row1, col1)}};
@@ -1052,152 +1052,99 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid, int 
 
 int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
 {
+    // 7-tier priority scoring for free pairs based on position:
+    // Weight 10: SQUARE BOX - four cells forming a 2x2 square with matching values
+    // Weight 7: middle rows (n/2-1, n/2) - STEP_Do's target rows
+    // Weight 6: lower rows + center columns
+    // Weight 5: lower rows + right columns
+    // Weight 4: lower rows + left columns
+    // Weight 3: upper rows + center columns
+    // Weight 2: upper rows + right columns
+    // Weight 1: upper rows + left columns
+    
     int N = crop.size();
     int half = N / 2;
-    int mid_row_start = half - 2; // n/2 - 1
-    int mid_row_end = half - 1;   // n/2
+    int mid_row_start = half - 1;  // n/2 - 1
+    int mid_row_end   = half;      // n/2
     int score = 0;
 
-    auto get_weight = [&](int row, int col, int mode) -> int
-    {
+    auto get_weight = [&](int row, int col) -> int {
         // Check if in middle rows
         bool in_mid_rows = (row == mid_row_start || row == mid_row_end);
-
+        
         // Check if upper or lower
-        bool is_upper = (row <= mid_row_start);
-        bool is_lower = (row >= mid_row_end);
-
+        bool is_upper = (row < mid_row_start);
+        bool is_lower = (row > mid_row_end);
+        
         // Check column zones
-        bool is_center = (col >= half - 2 + local_cnt && col <= half + 1 + local_cnt);
-        bool is_right = (col >= half + local_cnt);
-        bool is_left = (col < half + local_cnt);
-
-        if (mode)
-        {
-            // Priority 1 : middle rows
-            if (row == mid_row_start)
-                return 6;
-
-            // // Lower rows
-            // if (is_lower)
-            // {
-            //     if (is_center)
-            //         return 4; // Priority 2
-            //     if (is_right)
-            //         return 1; // Priority 3
-            //     if (is_left)
-            //         return 4; // Priority 4
-            // }
-
-            // // Upper rows
-            // if (is_upper)
-            // {
-            //     if (mid_row_start - 1 == row)
-            //     {
-            //         return 3;
-            //     }
-            //     else
-            //     {
-            //         return 1;
-            //     }
-            // }
-            if (mid_row_start - 1 == row)
-            {
-                return 6;
-            }
-            return 1;
+        bool is_center = (col >= half - 2 && col <= half + 1);
+        bool is_right  = (col > half + 1);
+        bool is_left   = (col < half - 2);
+        
+        // Priority 1 (weight 7): middle rows
+        if (in_mid_rows) return 7;
+        
+        // Lower rows
+        if (is_lower) {
+            if (is_center) return 6;  // Priority 2
+            if (is_right)  return 5;  // Priority 3
+            if (is_left)   return 4;  // Priority 4
         }
-        else
-        {
-
-            // Horizontal
-
-            if (row == mid_row_end)
-                return 6;
-            // Lower rows
-            if (is_lower)
-            {
-                if (is_center)
-                    return 8; 
-                if (is_right)
-                    return 3; 
-                if (is_left)
-                    return 8; 
-            }
-
-            // Upper rows
-            if (is_upper)
-            {
-                return 1; 
-            }
+        
+        // Upper rows
+        if (is_upper) {
+            if (is_center) return 3;  // Priority 5
+            if (is_right)  return 2;  // Priority 6
+            if (is_left)   return 1;  // Priority 7
         }
-
+        
         // Default (should not reach here)
         return 1;
     };
 
-    set<int> sr;
-    // First pass: check if there are same number in given area (weight 1)
-    // for (int j = local_cnt; j < min(N , local_cnt + Fsize / 3); j++)
-    // {
-    //     for (int i = mid_row_start; i < N ; i++)
-    //     {
-    //         if (locked[cnt + i][cnt + j])
-    //             continue;
-    //         if (auto search = sr.find(crop[i][j]); search != sr.end())
-    //         {
-    //             pair<int, int> pos = find_pos(crop, i, j);
-    //             if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
-    //                 score += 1;
-    //         }
-    //         else
-    //         {
-    //             if (j == local_cnt || j == local_cnt + 1)
-    //                 sr.insert(crop[i][j]);
-    //         }
-    //     }
-    // }
+    // First pass: detect 2x2 square boxes (weight 10)
+    for (int i = 0; i < N - 1; i++)
+    {
+        for (int j = 0; j < N - 1; j++)
+        {
+            // Check if all 4 corners are unlocked
+            if (locked[cnt + i][cnt + j] || locked[cnt + i][cnt + j + 1] ||
+                locked[cnt + i + 1][cnt + j] || locked[cnt + i + 1][cnt + j + 1])
+                continue;
+
+            // Check if all 4 cells have the same value (forming a square box)
+            uint16_t val = crop[i][j];
+            if (crop[i][j + 1] == val && crop[i + 1][j] == val && crop[i + 1][j + 1] == val)
+            {
+                score += 10;  // Square box found! Highest priority
+            }
+        }
+    }
 
     // Second pass: count regular pairs with positional weights
-    for (int j = local_cnt; j < N; j++)
+    for (int i = 0; i < N; i++)
     {
-        for (int i = mid_row_start; i < N; i++)
+        for (int j = 0; j < N; j++)
         {
             // Skip locked cells (translate to global coords using global cnt)
-            if (locked[cnt + i][cnt + j])
-                continue;
+            if (locked[cnt + i][cnt + j]) continue;
 
             // Horizontal pair: (i,j)-(i,j+1)
             if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && crop[i][j] == crop[i][j + 1])
             {
                 // For horizontal pairs, use the row and leftmost column
-                int w = get_weight(i, j, 0);
-                // int cof = 1;
-                // if(j == local_cnt)cof =4;
-                // if (j == local_cnt+1)
-                //     cof = 2;
-                // if (j == local_cnt+2)
-                //     cof = 2;
-
+                int w = get_weight(i, j);
                 score += w;
-                break;
             }
-        }
-    }
-    for (int i = mid_row_start - 1; i < N; i++)
-    {
-        for (int j = local_cnt; j < N; j++)
-        {
-            // Skip locked cells (translate to global coords using global cnt)
-            if (locked[cnt + i][cnt + j]||(j==local_cnt&&i ==mid_row_start - 1))
-                continue;
-
+            
             // Vertical pair: (i,j)-(i+1,j)
             if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
             {
-                int w = get_weight(i, j, 1);
-
-                if(j==local_cnt&&i==mid_row_start)score+=18;
+                // For vertical pairs, use the topmost row and column
+                // Average the weights of both cells since the pair spans two rows
+                int w1 = get_weight(i, j);
+                int w2 = get_weight(i + 1, j);
+                int w = (w1 + w2 + 1) / 2;  // Round up
                 score += w;
             }
         }
@@ -1205,11 +1152,168 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
     return score;
 }
 
+//int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int local_cnt)
+//{
+//    int N = crop.size();
+//    int half = N / 2;
+//    int mid_row_start = half - 2; // n/2 - 1
+//    int mid_row_end = half - 1;   // n/2
+//    int score = 0;
+//
+//    auto get_weight = [&](int row, int col, int mode) -> int
+//    {
+//        // Check if in middle rows
+//        bool in_mid_rows = (row == mid_row_start || row == mid_row_end);
+//
+//        // Check if upper or lower
+//        bool is_upper = (row <= mid_row_start);
+//        bool is_lower = (row >= mid_row_end);
+//
+//        // Check column zones
+//        bool is_center = (col >= half - 2 + local_cnt && col <= half + 1 + local_cnt);
+//        bool is_right = (col >= half + local_cnt);
+//        bool is_left = (col < half + local_cnt);
+//
+//        if (mode)
+//        {
+//            // Priority 1 : middle rows
+//            if (row == mid_row_start)
+//                return 6;
+//
+//            // // Lower rows
+//            // if (is_lower)
+//            // {
+//            //     if (is_center)
+//            //         return 4; // Priority 2
+//            //     if (is_right)
+//            //         return 1; // Priority 3
+//            //     if (is_left)
+//            //         return 4; // Priority 4
+//            // }
+//
+//            // // Upper rows
+//            // if (is_upper)
+//            // {
+//            //     if (mid_row_start - 1 == row)
+//            //     {
+//            //         return 3;
+//            //     }
+//            //     else
+//            //     {
+//            //         return 1;
+//            //     }
+//            // }
+//            if (mid_row_start - 1 == row)
+//            {
+//                return 6;
+//            }
+//            return 1;
+//        }
+//        else
+//        {
+//
+//            // Horizontal
+//
+//            if (row == mid_row_end)
+//                return 6;
+//            // Lower rows
+//            if (is_lower)
+//            {
+//                if (is_center)
+//                    return 8; 
+//                if (is_right)
+//                    return 3; 
+//                if (is_left)
+//                    return 8; 
+//            }
+//
+//            // Upper rows
+//            if (is_upper)
+//            {
+//                return 1; 
+//            }
+//        }
+//
+//        // Default (should not reach here)
+//        return 1;
+//    };
+//
+//    set<int> sr;
+//    // First pass: check if there are same number in given area (weight 1)
+//    // for (int j = local_cnt; j < min(N , local_cnt + Fsize / 3); j++)
+//    // {
+//    //     for (int i = mid_row_start; i < N ; i++)
+//    //     {
+//    //         if (locked[cnt + i][cnt + j])
+//    //             continue;
+//    //         if (auto search = sr.find(crop[i][j]); search != sr.end())
+//    //         {
+//    //             pair<int, int> pos = find_pos(crop, i, j);
+//    //             if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
+//    //                 score += 1;
+//    //         }
+//    //         else
+//    //         {
+//    //             if (j == local_cnt || j == local_cnt + 1)
+//    //                 sr.insert(crop[i][j]);
+//    //         }
+//    //     }
+//    // }
+//
+//    // Second pass: count regular pairs with positional weights
+//    for (int j = local_cnt; j < N; j++)
+//    {
+//        for (int i = mid_row_start; i < N; i++)
+//        {
+//            // Skip locked cells (translate to global coords using global cnt)
+//            if (locked[cnt + i][cnt + j])
+//                continue;
+//
+//            // Horizontal pair: (i,j)-(i,j+1)
+//            if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && crop[i][j] == crop[i][j + 1])
+//            {
+//                // For horizontal pairs, use the row and leftmost column
+//                int w = get_weight(i, j, 0);
+//                // int cof = 1;
+//                // if(j == local_cnt)cof =4;
+//                // if (j == local_cnt+1)
+//                //     cof = 2;
+//                // if (j == local_cnt+2)
+//                //     cof = 2;
+//
+//                score += w;
+//                break;
+//            }
+//        }
+//    }
+//    for (int i = mid_row_start - 1; i < N; i++)
+//    {
+//        for (int j = local_cnt; j < N; j++)
+//        {
+//            // Skip locked cells (translate to global coords using global cnt)
+//            if (locked[cnt + i][cnt + j]||(j==local_cnt&&i ==mid_row_start - 1))
+//                continue;
+//
+//            // Vertical pair: (i,j)-(i+1,j)
+//            if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
+//            {
+//                int w = get_weight(i, j, 1);
+//
+//                if(j==local_cnt&&i==mid_row_start){
+//                    score+=16;continue;
+//                }
+//                score += w;
+//            }
+//        }
+//    }
+//    return score;
+//}
+
 // Returns rotations in GLOBAL coordinates (i += cnt, j += cnt already applied).
 vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize, int PD = 0)
 {
-    const int MAX_DEPTH = (Fsize + 7) / 8;
-    const int BEAM_WIDTH = 300;
+    const int MAX_DEPTH = 2;
+    const int BEAM_WIDTH = 200;
     int N = crop.size(); // = Fsize
 
     cout << "[PreBeam] Starting on " << N << "x" << N
