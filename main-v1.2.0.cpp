@@ -1,13 +1,21 @@
-#include <bits/stdc++.h>
+#include <algorithm>
+#include <chrono>
 #include <cpr/cpr.h>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <omp.h>
+#include <queue>
 #include <random>
+#include <set>
+#include <string>
+#include <tuple>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 using namespace std;
-#include "metal_beam_search.h"
 using namespace std::chrono;
 using json = nlohmann::json;
 
@@ -32,17 +40,39 @@ bool SET_FP = true;
 bool DEBUG = false;
 bool ext_pair = false;
 
-// ── Zobrist Hashing ──
-static const int ZOBRIST_MAX_N = 64;
-static const int ZOBRIST_MAX_VAL = 2048; // n*n/2 for n=64
+// ─────────────────────────────────────────────────────────────
+// Zobrist Hashing
+// Each (row, col, value) triple gets a unique random 64-bit number.
+// MAX_N = 24, MAX_VAL = 24*24/2 = 288 distinct values (0..287 for safety 576)
+// ─────────────────────────────────────────────────────────────
+constexpr int ZOBRIST_MAX_N = 26;    // max board dim (a bit of slack)
+constexpr int ZOBRIST_MAX_VAL = 578; // max distinct value + 1
 uint64_t zobrist_table[ZOBRIST_MAX_N][ZOBRIST_MAX_N][ZOBRIST_MAX_VAL];
 
 void init_zobrist() {
-  std::mt19937_64 rng(0xDEADBEEF42ULL); // fixed seed for reproducibility
+  mt19937_64 rng(0xDEADBEEFCAFEULL);
   for (int r = 0; r < ZOBRIST_MAX_N; r++)
     for (int c = 0; c < ZOBRIST_MAX_N; c++)
       for (int v = 0; v < ZOBRIST_MAX_VAL; v++)
         zobrist_table[r][c][v] = rng();
+}
+
+// Compute full Zobrist hash for a grid.
+uint64_t zobrist_hash(const vector<vector<uint16_t>> &g) {
+  uint64_t h = 0;
+  int N = (int)g.size();
+  for (int r = 0; r < N; r++)
+    for (int c = 0; c < N; c++)
+      h ^= zobrist_table[r][c][g[r][c]];
+  return h;
+}
+
+// Incrementally update a Zobrist hash when a single cell changes from
+// old_val -> new_val at (r, c).
+inline void zobrist_update(uint64_t &h, int r, int c, uint16_t old_val,
+                           uint16_t new_val) {
+  h ^= zobrist_table[r][c][old_val];
+  h ^= zobrist_table[r][c][new_val];
 }
 
 struct GridState {
@@ -50,7 +80,7 @@ struct GridState {
   vector<Rotation> path;
   int paired_count;
   int heuristic;
-  uint64_t hash;
+  uint64_t hash = 0; // Zobrist hash — cached to avoid recomputation
 
   bool operator<(const GridState &other) const {
     if (paired_count != other.paired_count)
@@ -161,6 +191,62 @@ vector<vector<uint16_t>> apply_rotations(vector<vector<uint16_t>> grid,
   return grid;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Delta-Undo Rotation Helpers (Optimization #2)
+// Save only the k×k subblock before rotating; restore it after scoring.
+// This avoids an O(n²) full grid copy per candidate rotation.
+// ─────────────────────────────────────────────────────────────
+
+// Save the k×k subblock at (r,c) into a flat buffer.
+void save_block(const vector<vector<uint16_t>> &grid, int k, int r, int c,
+                vector<uint16_t> &buf) {
+  buf.resize(k * k);
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      buf[x * k + y] = grid[r + x][c + y];
+}
+
+// Restore the k×k subblock at (r,c) from the flat buffer.
+void restore_block(vector<vector<uint16_t>> &grid, int k, int r, int c,
+                   const vector<uint16_t> &buf) {
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      grid[r + x][c + y] = buf[x * k + y];
+}
+
+// Rotate the k×k block at (r,c) in-place (90° clockwise), updating 'hash'
+// incrementally via Zobrist XOR. Returns the saved old block in 'buf'.
+void rotate_inplace(vector<vector<uint16_t>> &grid, int k, int r, int c,
+                    vector<uint16_t> &buf, uint64_t &hash) {
+  save_block(grid, k, r, c, buf);
+  // XOR out old values
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      hash ^= zobrist_table[r + x][c + y][grid[r + x][c + y]];
+  // Apply 90° clockwise rotation: new[y][k-1-x] = old[x][y]
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      grid[r + y][c + k - 1 - x] = buf[x * k + y];
+  // XOR in new values
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      hash ^= zobrist_table[r + x][c + y][grid[r + x][c + y]];
+}
+
+// Restore the k×k block at (r,c) from buf, updating hash incrementally.
+void undo_rotate_inplace(vector<vector<uint16_t>> &grid, int k, int r, int c,
+                         const vector<uint16_t> &buf, uint64_t &hash) {
+  // XOR out current values
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      hash ^= zobrist_table[r + x][c + y][grid[r + x][c + y]];
+  restore_block(grid, k, r, c, buf);
+  // XOR in restored values
+  for (int x = 0; x < k; x++)
+    for (int y = 0; y < k; y++)
+      hash ^= zobrist_table[r + x][c + y][grid[r + x][c + y]];
+}
+
 void print_grid(const vector<vector<uint16_t>> &grid) {
   for (const auto &row : grid) {
     for (uint16_t val : row)
@@ -177,12 +263,10 @@ void print_grid(const vector<vector<uint8_t>> &grid) {
   }
 }
 
-uint64_t compute_zobrist_hash(const vector<vector<uint16_t>> &grid) {
-  uint64_t h = 0;
-  for (int r = 0; r < (int)grid.size(); r++)
-    for (int c = 0; c < (int)grid[r].size(); c++)
-      h ^= zobrist_table[r][c][grid[r][c]];
-  return h;
+// get_grid_key now returns a uint64_t Zobrist hash — O(1) lookup/insertion
+// in unordered_set<uint64_t> instead of full string allocation.
+uint64_t get_grid_key(const vector<vector<uint16_t>> &grid) {
+  return zobrist_hash(grid);
 }
 
 int count_adjacent_pairs(const vector<vector<uint16_t>> &grid) {
@@ -197,6 +281,27 @@ int count_adjacent_pairs(const vector<vector<uint16_t>> &grid) {
         count++;
     }
   return count;
+}
+
+// ─────────────────────────────────────────────────────────────
+// count_border_pairs: O(k²) incremental pair-count helper
+// Counts adjacent equal-value edges whose region touches [r..r+k-1][c..c+k-1].
+// Only these edges can change when that block is rotated.
+// delta_paired = new_border - old_border → new_paired = old_paired + delta
+// ─────────────────────────────────────────────────────────────
+int count_border_pairs(const vector<vector<uint16_t>> &g, int k, int r, int c) {
+  int N = (int)g.size(), cnt = 0;
+  // Horizontal edges: row x in [r,r+k-1], col y in [c-1,c+k-1] (y+1 in bounds)
+  for (int x = r; x < min(N, r + k); x++)
+    for (int y = max(0, c - 1); y < min(N - 1, c + k); y++)
+      if (g[x][y] == g[x][y + 1])
+        cnt++;
+  // Vertical edges: row x in [r-1,r+k-1] (x+1 in bounds), col y in [c,c+k-1]
+  for (int x = max(0, r - 1); x < min(N - 1, r + k); x++)
+    for (int y = c; y < min(N, c + k); y++)
+      if (g[x][y] == g[x + 1][y])
+        cnt++;
+  return cnt;
 }
 
 int count_paired_values(const vector<vector<uint16_t>> &grid) {
@@ -223,6 +328,58 @@ int count_paired_values(const vector<vector<uint16_t>> &grid) {
       paired_count++;
   }
   return paired_count;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Incremental Pair-Count Helper (Optimization #3)
+// Instead of rescanning the whole grid, only re-check the border cells
+// of the rotated k×k block plus their immediate neighbours.
+// ─────────────────────────────────────────────────────────────
+int count_paired_values_incremental(const vector<vector<uint16_t>> &grid, int k,
+                                    int r, int c, int old_count) {
+  int N = (int)grid.size();
+
+  // Build the set of cell positions that could change adjacency.
+  // These are: all cells in the block, plus the border ring just outside.
+  unordered_set<int> check_vals;
+  for (int x = max(0, r - 1); x <= min(N - 1, r + k); x++)
+    for (int y = max(0, c - 1); y <= min(N - 1, c + k); y++)
+      check_vals.insert(grid[x][y]);
+
+  // For each affected value, find both copies and check adjacency.
+  // We need all positions for the affected values.
+  unordered_map<int, vector<pair<int, int>>> coords;
+  for (int x = 0; x < N; x++)
+    for (int y = 0; y < N; y++)
+      if (check_vals.count(grid[x][y]))
+        coords[grid[x][y]].push_back({x, y});
+
+  // Count pairs only among affected values (both inside and outside block).
+  // We will subtract the OLD contribution of affected values and add the NEW.
+  // To do this correctly, use full rescan just for the affected set — still
+  // O(k²) rather than O(N²).
+  int affected_new = 0;
+  for (auto &[v, positions] : coords) {
+    if (positions.size() < 2)
+      continue;
+    auto &p1 = positions[0];
+    auto &p2 = positions[1];
+    int d = abs(p1.first - p2.first) + abs(p1.second - p2.second);
+    if (d == 1)
+      affected_new++;
+  }
+
+  // count the old contribution of the same values by checking with saved block
+  // It's simpler and correct to just return count_paired_values(grid) for
+  // correctness; the speedup is still large because we skip all unaffected
+  // vals. For a truly incremental version, we'd need the pre-rotation grid too.
+  // This hybrid approach gives ~O(k²·log N) vs O(N²).
+  (void)old_count; // suppress unused warning
+  // Fall back to full scan for correctness (still faster when k << N because
+  // check_vals limits coords population): No — just call full count here.
+  // The speed win from delta-undo comes from not copying the grid; the pair
+  // count must be fully correct. Keep full recount for now.
+  return count_paired_values(grid);
 }
 
 int calculate_manhattan_heuristic(const vector<vector<uint16_t>> &grid) {
@@ -254,7 +411,8 @@ int calculate_manhattan_heuristic(const vector<vector<uint16_t>> &grid) {
 bool is_solved(const vector<vector<uint16_t>> &grid) {
   int rows = grid.size();
   int cols = grid.empty() ? 0 : grid[0].size();
-  // Number of distinct values = rows*cols/2 (each value appears exactly twice)
+  // count_paired_values is O(n²) — callers should prefer checking
+  // new_paired == target_paired directly when the count is already known.
   return count_paired_values(grid) == (rows * cols) / 2;
 }
 
@@ -396,8 +554,8 @@ move_free_pair_to_target(const vector<vector<uint16_t>> &initial_grid, int pr1,
 pair<int, vector<Rotation>>
 search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1,
             int row2, int col2, int mnr, int mxr, int mnc, int mxc) {
-  const int beam_width = 10 + cnt * 5;
-  const int max_depth = 3;
+  const int beam_width = 30 + cnt * 10;
+  const int max_depth = 4;
   int N = initial_grid.size();
 
   vector<State> current_beam = {
@@ -455,7 +613,14 @@ search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1,
                     2 * a.path.size();
            int db = abs(b.pos.first - row2) + abs(b.pos.second - col2) +
                     2 * b.path.size();
-           return da < db;
+           if (da != db)
+             return da < db;
+
+           // Secondary heuristic: prefer grids that preserve/increase global
+           // identical pairs
+           int pairs_a = count_paired_values(a.grid) - (a.path.size() * 0.1);
+           int pairs_b = count_paired_values(b.grid) - (b.path.size() * 0.1);
+           return pairs_a > pairs_b;
          });
     if (next_beam.size() > static_cast<size_t>(beam_width))
       next_beam.resize(beam_width);
@@ -1279,10 +1444,12 @@ vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop,
 }
 
 pair<vector<vector<uint16_t>>, vector<Rotation>>
-STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode) {
+STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode,
+        bool build_pillar = false) {
   int half = Fsize / 2;
   int row = half - 2;
   vector<int> dp(half + 2, 0);
+  vector<int> pillar_counts(half + 2, 0);
 
   cout << "\n=== Beam search prep (Fsize=" << Fsize << ") ===\n";
   vector<Rotation> pre_path = pre_step_beam_search(grid, Fsize);
@@ -1338,6 +1505,7 @@ STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode) {
 
     if (V_ops2 > H_ops) {
       dp[j] = H_ops;
+      pillar_counts[j] = pillar_counts[j - 2];
       result[j].first = apply_rotations(result[j - 2].first, H_result.second);
       result[j].second = result[j - 2].second;
       for (auto &rot : H_result.second)
@@ -1347,11 +1515,48 @@ STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode) {
         cout << "\tYEAHHHHH\t";
     } else {
       dp[j] = V_ops2;
+      pillar_counts[j] = pillar_counts[j - 1];
       result[j].first = apply_rotations(result[j - 1].first, V_r.second);
       result[j].second = result[j - 1].second;
       for (auto &rot : V_r.second)
         result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
       cout << "V (f)cost : " << V_r.first;
+    }
+
+    if (build_pillar) {
+      int current_p = pillar_counts[j];
+      int target_r1 = Fsize - 1 - current_p * 2;
+      int target_r2 = target_r1 - 1;
+
+      if (target_r2 > half) {
+        int p_min_ops = 999;
+        vector<Rotation> best_path;
+
+        auto p1 = search_pair(result[j].first, target_r1, 2, target_r2, 2, half,
+                              Fsize - 1, 0, Fsize - 1);
+        if (p1.first < p_min_ops) {
+          p_min_ops = p1.first;
+          best_path = p1.second;
+        }
+
+        auto p2 = search_pair(result[j].first, target_r2, 2, target_r1, 2, half,
+                              Fsize - 1, 0, Fsize - 1);
+        if (p2.first < p_min_ops) {
+          p_min_ops = p2.first;
+          best_path = p2.second;
+        }
+
+        if (p_min_ops < 999) {
+          result[j].first = apply_rotations(result[j].first, best_path);
+          for (auto &rot : best_path) {
+            result[j].second.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
+          }
+          locked[cnt + target_r1][cnt + 2] = 1;
+          locked[cnt + target_r2][cnt + 2] = 1;
+          pillar_counts[j]++;
+          cout << " \tPillar[" << current_p << "] cost: " << p_min_ops;
+        }
+      }
     }
     // if ((mode + half) / 2 == j)
     // {
@@ -1387,18 +1592,96 @@ STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  File 2: Beam Search (3-cycle macro + healing + backtracking)
+// Post-Processing: Path Simplification (Peephole Optimization)
 // ─────────────────────────────────────────────────────────────
 
+bool rotations_overlap(const Rotation &r1, const Rotation &r2) {
+  if (r1.i >= r2.i + r2.k || r2.i >= r1.i + r1.k)
+    return false;
+  if (r1.j >= r2.j + r2.k || r2.j >= r1.j + r1.k)
+    return false;
+  return true;
+}
+
+vector<Rotation> simplify_path(const vector<Rotation> &path) {
+  if (path.empty())
+    return path;
+
+  vector<Rotation> sim;
+  sim.reserve(path.size());
+  bool changed = true;
+
+  vector<Rotation> current = path;
+
+  while (changed) {
+    changed = false;
+    sim.clear();
+
+    for (int i = 0; i < (int)current.size(); ++i) {
+      bool pushed = true;
+
+      // Try bubbling the current rotation forward to see if it cancels with
+      // another identical rotation
+      int match_count = 1;
+      int last_bubble_pos = i;
+
+      for (int j = i + 1; j < min((int)current.size(), i + 15); ++j) {
+        if (current[i].k == current[j].k && current[i].i == current[j].i &&
+            current[i].j == current[j].j) {
+          match_count++;
+          last_bubble_pos = j;
+        } else if (rotations_overlap(current[i], current[j])) {
+          break;
+        }
+      }
+
+      if (match_count >= 4) {
+        // 4 identical rotations = 360 degrees = no-op
+        int remaining_removals = 3; // we skip 'i', so we remove 3 more
+        for (int j = i + 1; j <= last_bubble_pos && remaining_removals > 0;
+             ++j) {
+          if (current[i].k == current[j].k && current[i].i == current[j].i &&
+              current[i].j == current[j].j) {
+            current[j].k = -1; // mark as deleted
+            remaining_removals--;
+          }
+        }
+        changed = true;
+        pushed = false;
+      }
+
+      if (pushed && current[i].k != -1) {
+        sim.push_back(current[i]);
+      }
+    }
+    current = sim;
+  }
+  return current;
+}
+
+// apply_macro_cycle: performs three 90°-clockwise rotations as a "3-cycle"
+// macro move: rot(k,i,j), rot(k,i,j+1), rot(k,i,j) inverse (= 3 more cw
+// rotations). Purpose: escape stuck beam-search states without
+// single-rotation moves.
 vector<vector<uint16_t>> apply_macro_cycle(vector<vector<uint16_t>> grid, int k,
                                            int i, int j,
                                            vector<Rotation> &path) {
-  for (int step = 0; step < 4; ++step) {
-    grid = rotate_submatrix(grid, k, i, j + 1);
-    path.emplace_back(k, i, j + 1);
-    grid = rotate_submatrix(grid, k, i, j);
-    path.emplace_back(k, i, j);
-  }
+  // Sequence: R(k,i,j), R(k,i,j+1), R(k,i,j), R(k,i,j)
+  // (3 forward rotations on first block = one reverse + forward on second)
+  grid = rotate_submatrix(grid, k, i, j);
+  path.emplace_back(k, i, j);
+  grid = rotate_submatrix(grid, k, i, j + 1);
+  path.emplace_back(k, i, j + 1);
+  grid = rotate_submatrix(grid, k, i, j);
+  path.emplace_back(k, i, j);
+  grid = rotate_submatrix(grid, k, i, j);
+  path.emplace_back(k, i, j);
+  grid = rotate_submatrix(grid, k, i, j + 1);
+  path.emplace_back(k, i, j + 1);
+  grid = rotate_submatrix(grid, k, i, j + 1);
+  path.emplace_back(k, i, j + 1);
+  grid = rotate_submatrix(grid, k, i, j + 1);
+  path.emplace_back(k, i, j + 1);
   return grid;
 }
 
@@ -1464,10 +1747,8 @@ vector<GridState> unstuck_healing(const GridState &stuck_state,
     }
 
     int new_paired = count_paired_values(current_grid);
-    int new_heuristic = calculate_manhattan_heuristic(current_grid);
-    uint64_t new_hash = compute_zobrist_hash(current_grid);
-    healed_states.push_back(
-        {current_grid, current_path, new_paired, new_heuristic, new_hash});
+    healed_states.push_back({current_grid, current_path, new_paired, 0,
+                             zobrist_hash(current_grid)});
   }
 
   sort(healed_states.begin(), healed_states.end(),
@@ -1492,33 +1773,23 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   int target_paired = inner_n * inner_n / 2;
 
   int initial_paired = count_paired_values(inner_grid);
-  int initial_heuristic = calculate_manhattan_heuristic(inner_grid);
 
-  int base_beam_width = 5000;
+  // Heuristic only used for initial display; set 0 in beam states to skip
+  // the expensive O(n²) calculate_manhattan_heuristic in the hot loop.
+  int initial_heuristic = 0;
+
+  int base_beam_width = max(1, 184320 / (inner_n * inner_n));
   double beam_multiplier = 1.0;
-
-  MetalBeamSearch gpu_search(inner_n, 30000, 5000);
-  gpu_search.set_zobrist_table(&zobrist_table[0][0][0]);
 
   int num_threads = omp_get_max_threads();
   cout << "Starting Beam Search on " << inner_n << "x" << inner_n
        << " inner block (offset=" << offset << ", beam=" << base_beam_width
-       << ", threads=" << num_threads << ", GPU processing enabled)\n";
+       << ", threads=" << num_threads << ")\n";
   cout << "Initial paired: " << initial_paired << "/" << target_paired << "\n";
 
-  vector<tuple<int, int, int>> valid_rotations;
-  for (int k = 2; k < inner_n - 1; ++k) {
-    for (int i = 0; i <= inner_n - k; ++i) {
-      for (int j = 0; j <= inner_n - k; ++j) {
-        if (Check_Valid(i + offset, j + offset, k - 1)) {
-          valid_rotations.push_back({k, i, j});
-        }
-      }
-    }
-  }
+  uint64_t initial_hash = zobrist_hash(inner_grid);
 
   priority_queue<GridState> beam;
-  uint64_t initial_hash = compute_zobrist_hash(inner_grid);
   beam.push({inner_grid, {}, initial_paired, initial_heuristic, initial_hash});
 
   GridState global_best = {
@@ -1546,100 +1817,176 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
       beam.pop();
     }
 
+    vector<vector<GridState>> thread_local_states(num_threads);
+    vector<unordered_set<uint64_t>> thread_local_visited(num_threads);
+
     int best_paired_in_depth = 0;
     bool solution_found = false;
     vector<Rotation> solution_path;
 
-    int num_states = current_states.size();
-    vector<uint16_t> grids_flat(num_states * inner_n * inner_n);
-    for (int s = 0; s < num_states; ++s) {
-      for (int r = 0; r < inner_n; ++r) {
-        for (int c = 0; c < inner_n; ++c) {
-          grids_flat[s * inner_n * inner_n + r * inner_n + c] =
-              current_states[s].grid[r][c];
+#pragma omp parallel
+    {
+      int thread_id = omp_get_thread_num();
+      int local_best_paired = 0;
+
+#pragma omp for schedule(dynamic)
+      for (int idx = 0; idx < (int)current_states.size(); idx++) {
+        if (solution_found)
+          continue;
+        const GridState &current = current_states[idx];
+
+        if (current.paired_count > global_best.paired_count)
+#pragma omp critical
+        {
+          if (current.paired_count > global_best.paired_count)
+            global_best = current;
         }
-      }
-    }
 
-    vector<GPUResult> gpu_results = gpu_search.evaluate_batch(
-        grids_flat, num_states, valid_rotations, inner_n);
-
-    priority_queue<GridState> next_beam;
-    unordered_set<uint64_t> global_visited;
-
-    for (const auto &res : gpu_results) {
-      if (res.paired_count == 0 && res.heuristic == 0)
-        continue;
-      if (res.paired_count < current_states[res.parent_idx].paired_count)
-        continue;
-
-      if (global_visited.find(res.hash) == global_visited.end()) {
-        global_visited.insert(res.hash);
-
-        GridState ns = current_states[res.parent_idx];
-        int k = get<0>(valid_rotations[res.rotation_idx]);
-        int i = get<1>(valid_rotations[res.rotation_idx]);
-        int j = get<2>(valid_rotations[res.rotation_idx]);
-
-        ns.grid = rotate_submatrix(ns.grid, k, i, j);
-        ns.path.emplace_back(k, i, j);
-        ns.paired_count = res.paired_count;
-        ns.heuristic = res.heuristic;
-        ns.hash = res.hash;
-
-        if (ns.paired_count > best_paired_in_depth)
-          best_paired_in_depth = ns.paired_count;
-        if (ns.paired_count > global_best.paired_count)
-          global_best = ns;
-
-        if (is_solved(ns.grid)) {
-          solution_found = true;
-          solution_path = ns.path;
-          break;
+        if (is_solved(current.grid))
+#pragma omp critical
+        {
+          if (!solution_found) {
+            solution_found = true;
+            solution_path = current.path;
+          }
         }
-        next_beam.push(std::move(ns));
-      }
-    }
 
-    if (stuck_counter >= 4 && !solution_found) {
-      for (int idx = 0; idx < num_states; ++idx) {
-        GridState current = current_states[idx];
+        // ── Delta-undo: ONE working-grid copy per beam state,
+        //    shared across all rotation candidates for this state.
+        //    Each candidate: rotate in-place O(k²), score, undo O(k²).
+        //    Grid copy O(n²) happens only when committing to the next beam.
+        auto work_grid = current.grid; // one copy per state
+        uint64_t work_hash = current.hash;
+        vector<uint16_t> undo_buf; // reused buffer for in-place undo
+
         for (int k = 2; k < inner_n - 1; ++k) {
+          if (solution_found)
+            break;
           for (int i = 0; i <= inner_n - k; ++i) {
-            for (int j = 0; j <= inner_n - k - 1; ++j) {
-              if (Check_Valid(i + offset, j + offset, k - 1)) {
+            if (solution_found)
+              break;
+            for (int j = 0; j <= inner_n - k; ++j) {
+              if (solution_found)
+                break;
+              if (!Check_Valid(i + offset, j + offset, k - 1))
+                continue;
+
+              // 3-cycle macro (stuck mode) — uses a separate copy, infrequent
+              if (stuck_counter >= 4 && j + 1 <= inner_n - k) {
                 vector<Rotation> macro_path = current.path;
                 vector<vector<uint16_t>> macro_grid =
                     apply_macro_cycle(current.grid, k, i, j, macro_path);
                 int macro_paired = count_paired_values(macro_grid);
                 if (macro_paired >= current.paired_count) {
-                  int macro_heuristic =
-                      calculate_manhattan_heuristic(macro_grid);
-                  uint64_t mk = compute_zobrist_hash(macro_grid);
-                  if (global_visited.find(mk) == global_visited.end()) {
-                    global_visited.insert(mk);
-                    if (macro_paired > global_best.paired_count)
-                      global_best = {macro_grid, macro_path, macro_paired,
-                                     macro_heuristic, mk};
-                    if (macro_paired > best_paired_in_depth)
-                      best_paired_in_depth = macro_paired;
-                    if (is_solved(macro_grid)) {
-                      solution_found = true;
-                      solution_path = macro_path;
-                      break;
+                  uint64_t mk = zobrist_hash(macro_grid);
+                  if (thread_local_visited[thread_id].find(mk) ==
+                      thread_local_visited[thread_id].end()) {
+                    thread_local_visited[thread_id].insert(mk);
+                    if (macro_paired > local_best_paired)
+                      local_best_paired = macro_paired;
+                    if (macro_paired == target_paired)
+#pragma omp critical
+                    {
+                      if (!solution_found) {
+                        solution_found = true;
+                        solution_path = macro_path;
+                      }
                     }
-                    next_beam.push({macro_grid, macro_path, macro_paired,
-                                    macro_heuristic, mk});
+                    // heuristic=0: skip O(n²) manhattan scan
+                    thread_local_states[thread_id].push_back(
+                        {macro_grid, macro_path, macro_paired, 0, mk});
                   }
                 }
               }
+
+              // ── Incremental pair count O(k²): border edges before/after ──
+              int old_border = count_border_pairs(work_grid, k, i, j);
+              rotate_inplace(work_grid, k, i, j, undo_buf, work_hash);
+              int new_border = count_border_pairs(work_grid, k, i, j);
+              int new_paired = current.paired_count - old_border + new_border;
+
+              if (new_paired >= current.paired_count) {
+                if (new_paired > local_best_paired)
+                  local_best_paired = new_paired;
+
+                // Dedup O(1) hash check — no string allocation
+                if (thread_local_visited[thread_id].find(work_hash) ==
+                    thread_local_visited[thread_id].end()) {
+                  thread_local_visited[thread_id].insert(work_hash);
+
+                  if (new_paired == target_paired)
+#pragma omp critical
+                  {
+                    if (!solution_found) {
+                      solution_found = true;
+                      solution_path = current.path;
+                      solution_path.emplace_back(k, i, j);
+                    }
+                  }
+
+                  // heuristic=0: skip O(n²) manhattan scan in hot loop
+                  vector<Rotation> np = current.path;
+                  np.emplace_back(k, i, j);
+                  thread_local_states[thread_id].push_back(
+                      {work_grid, np, new_paired, 0, work_hash});
+                }
+              }
+
+              // Undo — restore work_grid and work_hash in O(k²)
+              undo_rotate_inplace(work_grid, k, i, j, undo_buf, work_hash);
             }
           }
+        }
+
+#pragma omp critical
+        {
+          if (local_best_paired > best_paired_in_depth)
+            best_paired_in_depth = local_best_paired;
         }
       }
     }
 
-    if (stuck_counter >= 6) {
+    if (solution_found) {
+      cout << "Solution found at depth " << depth << endl;
+      for (auto &r : solution_path) {
+        r.i += offset;
+        r.j += offset;
+      }
+      return solution_path;
+    }
+
+    cout << "Depth " << depth << ": " << current_states.size()
+         << " states, best paired: " << best_paired_in_depth << "/"
+         << target_paired;
+
+    if (best_paired_in_depth > last_best_paired) {
+      cout << " (IMPROVED!)";
+      StateSnapshot snapshot;
+      snapshot.beam_states = current_states;
+      snapshot.paired_count = best_paired_in_depth;
+      snapshot.depth_at_snapshot = depth;
+      snapshot.beam_multiplier = beam_multiplier;
+      state_history.push_back(snapshot);
+      last_best_paired = best_paired_in_depth;
+      stuck_counter = 0;
+    } else {
+      stuck_counter++;
+      cout << " (stuck: " << stuck_counter << "/5)";
+    }
+    cout << "\n";
+
+    priority_queue<GridState> next_beam;
+    unordered_set<uint64_t> global_visited;
+    for (int t = 0; t < num_threads; t++)
+      for (const auto &state : thread_local_states[t]) {
+        uint64_t key = get_grid_key(state.grid);
+        if (global_visited.find(key) == global_visited.end()) {
+          global_visited.insert(key);
+          next_beam.push(state);
+        }
+      }
+
+    if (stuck_counter >= 5) {
       if (!state_history.empty()) {
         cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
         bool found_valid_backtrack = false;
@@ -1742,13 +2089,14 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 }
 
 int main() {
+  init_zobrist(); // Initialize Zobrist hash table (Optimization #1)
   omp_set_num_threads(omp_get_max_threads());
   cout << "Using " << omp_get_max_threads() << " threads\n";
-  init_zobrist();
 
   vector<vector<uint16_t>> init_grid = get_random_board(24);
   vector<vector<uint16_t>> grid = init_grid;
   n = grid.size();
+  cout << "Board size: " << n << "x" << n << "\n";
   locked = vector<vector<uint8_t>>(n, vector<uint8_t>(n, 0));
   vector<Rotation> full_path;
 
@@ -1765,7 +2113,7 @@ int main() {
 
     // First STEP_Do call (corner 1, part 1)
     pair<vector<vector<uint16_t>>, vector<Rotation>> res =
-        STEP_Do(Fsize, crop, 0);
+        STEP_Do(Fsize, crop, 0, true);
     partial_path.insert(partial_path.end(), res.second.begin(),
                         res.second.end());
 
@@ -1773,8 +2121,8 @@ int main() {
     locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
     partial_path.emplace_back(Fsize, cnt, cnt);
 
-    // Loop through remaining corners (4 corners total, we already did the first
-    // STEP_Do)
+    // Loop through remaining corners (4 corners total, we already did the
+    // first STEP_Do)
     for (int i = 0; i < 3; i++) {
 
       // Second STEP_Do of this corner pair (completes one corner)
@@ -1796,7 +2144,10 @@ int main() {
                         res.second.end());
 
     grid = apply_rotations(grid, partial_path);
+
+    // Before inserting, try simplifying the newly appended path slice
     full_path.insert(full_path.end(), partial_path.begin(), partial_path.end());
+    full_path = simplify_path(full_path);
 
     cout << "Current Frame cost :" << partial_path.size() << '\n';
     cout << "Current Frame total cost :" << full_path.size() << '\n';
@@ -1814,7 +2165,8 @@ int main() {
 
   // ── Phase 2: Beam search on the remaining inner block ──
   // After the STEP_Do loop, cnt has been incremented so the remaining
-  // unsolved region is (n - cnt*2) x (n - cnt*2) starting at global offset cnt.
+  // unsolved region is (n - cnt*2) x (n - cnt*2) starting at global offset
+  // cnt.
   {
     int inner_n = n - cnt * 2; // e.g. 12 for n=24 after 3 STEP_Do passes
     int offset = cnt;          // global row/col offset of the inner block
@@ -1873,7 +2225,8 @@ int main() {
   cout << "Solved: " << (is_solved(init_grid) ? "YES" : "NO") << "\n";
 
   if (broke)
-    cout << "-------------------------------------BROKE------------------------"
+    cout << "-------------------------------------BROKE----------------------"
+            "--"
             "----------\n";
 
   return 0;

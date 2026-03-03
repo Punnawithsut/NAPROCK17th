@@ -7,9 +7,40 @@
 #include <unordered_set>
 
 using namespace std;
-#include "metal_beam_search.h"
 using namespace std::chrono;
 using json = nlohmann::json;
+
+// ========== NEW: Configurable backtrack depth ==========
+const int BACKTRACK_DEPTH = 10; // go back this many snapshots when stuck
+const int STUCK_LIMIT =
+    6; // trigger backtrack after this many non-improving depths
+// ========================================================
+
+#include "metal_beam_search.h"
+
+uint64_t zobrist_table[64][64][2048];
+
+void init_zobrist() {
+  mt19937_64 rng(123456789ULL);
+  for (int r = 0; r < 64; r++)
+    for (int c = 0; c < 64; c++)
+      for (int v = 0; v < 2048; v++)
+        zobrist_table[r][c][v] = rng();
+}
+
+uint64_t compute_zobrist_hash(const vector<vector<uint16_t>> &grid) {
+  uint64_t h = 0;
+  int r_len = grid.size();
+  if (r_len == 0)
+    return 0;
+  int c_len = grid[0].size();
+  for (int r = 0; r < r_len; r++) {
+    for (int c = 0; c < c_len; c++) {
+      h ^= zobrist_table[r][c][grid[r][c]];
+    }
+  }
+  return h;
+}
 
 struct Rotation {
   int k, i, j;
@@ -31,19 +62,6 @@ bool broke = false;
 bool SET_FP = true;
 bool DEBUG = false;
 bool ext_pair = false;
-
-// ── Zobrist Hashing ──
-static const int ZOBRIST_MAX_N = 64;
-static const int ZOBRIST_MAX_VAL = 2048; // n*n/2 for n=64
-uint64_t zobrist_table[ZOBRIST_MAX_N][ZOBRIST_MAX_N][ZOBRIST_MAX_VAL];
-
-void init_zobrist() {
-  std::mt19937_64 rng(0xDEADBEEF42ULL); // fixed seed for reproducibility
-  for (int r = 0; r < ZOBRIST_MAX_N; r++)
-    for (int c = 0; c < ZOBRIST_MAX_N; c++)
-      for (int v = 0; v < ZOBRIST_MAX_VAL; v++)
-        zobrist_table[r][c][v] = rng();
-}
 
 struct GridState {
   vector<vector<uint16_t>> grid;
@@ -67,7 +85,7 @@ struct StateSnapshot {
 };
 
 auto start_time = high_resolution_clock::now();
-const double TIME_LIMIT = 270.0;
+const double TIME_LIMIT = 600.0;
 
 bool is_time_up() {
   auto now = high_resolution_clock::now();
@@ -177,12 +195,17 @@ void print_grid(const vector<vector<uint8_t>> &grid) {
   }
 }
 
-uint64_t compute_zobrist_hash(const vector<vector<uint16_t>> &grid) {
-  uint64_t h = 0;
-  for (int r = 0; r < (int)grid.size(); r++)
-    for (int c = 0; c < (int)grid[r].size(); c++)
-      h ^= zobrist_table[r][c][grid[r][c]];
-  return h;
+string serialize(const vector<vector<uint16_t>> &g) {
+  string s;
+  int N = g.size();
+  for (int r = 0; r < N; r++)
+    for (int c = 0; c < N; c++)
+      s += to_string(g[r][c]) + ",";
+  return s;
+}
+
+string get_grid_key(const vector<vector<uint16_t>> &grid) {
+  return to_string(compute_zobrist_hash(grid));
 }
 
 int count_adjacent_pairs(const vector<vector<uint16_t>> &grid) {
@@ -396,7 +419,7 @@ move_free_pair_to_target(const vector<vector<uint16_t>> &initial_grid, int pr1,
 pair<int, vector<Rotation>>
 search_pair(const vector<vector<uint16_t>> &initial_grid, int row1, int col1,
             int row2, int col2, int mnr, int mxr, int mnc, int mxc) {
-  const int beam_width = 10 + cnt * 5;
+  const int beam_width = 30 + cnt * 5;
   const int max_depth = 3;
   int N = initial_grid.size();
 
@@ -593,7 +616,7 @@ pair<int, vector<Rotation>>
 move_extend_free_pair(const vector<vector<uint16_t>> &initial_grid, int tlr,
                       int tlc, int brr, int brc, int target_r, int target_c) {
   const int beam_width = 20;
-  const int max_depth = 2;
+  const int max_depth = 3;
   int N = initial_grid.size();
   vector<State> current_beam = {{initial_grid, {}, {tlr, tlc}}};
 
@@ -844,7 +867,6 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid,
     auto [ops2, path2] =
         search_pair(apply_rotations(grid, path1), row + 1, j, row + 1, j + 1, 0,
                     Fsize - 1, 0, Fsize - 1);
-
     if (ops1 + ops2 < min_ops) {
       min_ops = ops1 + ops2;
       partial_result = path1;
@@ -853,6 +875,7 @@ pair<int, vector<Rotation>> Horizontal_place(vector<vector<uint16_t>> grid,
     }
     locked[cnt + row][cnt + j] = 0;
     locked[cnt + row][cnt + j + 1] = 0;
+    min_ops = ops1 + ops2;
   }
   if (min_ops <= 2)
     return {min_ops, partial_result};
@@ -1117,20 +1140,25 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize,
 
   set<int> sr;
   // First pass: check if there are same number in given area (weight 1)
-  for (int j = local_cnt; j < min(N, local_cnt + Fsize / 3); j++) {
-    for (int i = mid_row_start; i < N; i++) {
-      if (locked[cnt + i][cnt + j])
-        continue;
-      if (auto search = sr.find(crop[i][j]); search != sr.end()) {
-        pair<int, int> pos = find_pos(crop, i, j);
-        if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
-          score += 1;
-      } else {
-        if (j == local_cnt || j == local_cnt + 1)
-          sr.insert(crop[i][j]);
-      }
-    }
-  }
+  // for (int j = local_cnt; j < min(N , local_cnt + Fsize / 3); j++)
+  // {
+  //     for (int i = mid_row_start; i < N ; i++)
+  //     {
+  //         if (locked[cnt + i][cnt + j])
+  //             continue;
+  //         if (auto search = sr.find(crop[i][j]); search != sr.end())
+  //         {
+  //             pair<int, int> pos = find_pos(crop, i, j);
+  //             if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
+  //                 score += 1;
+  //         }
+  //         else
+  //         {
+  //             if (j == local_cnt || j == local_cnt + 1)
+  //                 sr.insert(crop[i][j]);
+  //         }
+  //     }
+  // }
 
   // Second pass: count regular pairs with positional weights
   for (int j = local_cnt; j < N; j++) {
@@ -1157,9 +1185,10 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize,
     }
   }
   for (int i = mid_row_start - 1; i < N; i++) {
-    for (int j = local_cnt + 1; j < N; j++) {
+    for (int j = local_cnt; j < N; j++) {
       // Skip locked cells (translate to global coords using global cnt)
-      if (locked[cnt + i][cnt + j])
+      if (locked[cnt + i][cnt + j] ||
+          (j == local_cnt && i == mid_row_start - 1))
         continue;
 
       // Vertical pair: (i,j)-(i+1,j)
@@ -1167,6 +1196,8 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize,
           crop[i][j] == crop[i + 1][j]) {
         int w = get_weight(i, j, 1);
 
+        if (j == local_cnt && i == mid_row_start)
+          score += 18;
         score += w;
       }
     }
@@ -1178,7 +1209,7 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize,
 vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop,
                                       int Fsize, int PD = 0) {
   const int MAX_DEPTH = (Fsize + 7) / 8;
-  const int BEAM_WIDTH = 200;
+  const int BEAM_WIDTH = 300;
   int N = crop.size(); // = Fsize
 
   cout << "[PreBeam] Starting on " << N << "x" << N << " crop (cnt=" << cnt
@@ -1358,7 +1389,6 @@ STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode) {
     //     cout << "\n=== Beam search prep (Fsize=" << Fsize << ") ===\n";
     //     pre_path = pre_step_beam_search(result[j].first, Fsize, j);
     //     {
-
     //         if (!pre_path.empty())
     //         {
     //             // Apply to crop in LOCAL coords
@@ -1402,6 +1432,7 @@ vector<vector<uint16_t>> apply_macro_cycle(vector<vector<uint16_t>> grid, int k,
   return grid;
 }
 
+// ========== MODIFIED: added timeout checks inside healing ==========
 vector<GridState> unstuck_healing(const GridState &stuck_state,
                                   int num_random_moves) {
   cout << "HEALING: Applying combination of random moves and 3-cycle macro "
@@ -1413,6 +1444,9 @@ vector<GridState> unstuck_healing(const GridState &stuck_state,
   mt19937 gen(rd());
 
   for (int attempt = 0; attempt < 15; attempt++) {
+    if (is_time_up())
+      break; // <-- new timeout check
+
     vector<vector<uint16_t>> current_grid = stuck_state.grid;
     vector<Rotation> current_path = stuck_state.path;
 
@@ -1493,6 +1527,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 
   int initial_paired = count_paired_values(inner_grid);
   int initial_heuristic = calculate_manhattan_heuristic(inner_grid);
+  uint64_t initial_hash = compute_zobrist_hash(inner_grid);
 
   int base_beam_width = 5000;
   double beam_multiplier = 1.0;
@@ -1507,7 +1542,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   cout << "Initial paired: " << initial_paired << "/" << target_paired << "\n";
 
   vector<tuple<int, int, int>> valid_rotations;
-  for (int k = 2; k < inner_n - 1; ++k) {
+  for (int k = 2; k <= inner_n - 1; ++k) {
     for (int i = 0; i <= inner_n - k; ++i) {
       for (int j = 0; j <= inner_n - k; ++j) {
         if (Check_Valid(i + offset, j + offset, k - 1)) {
@@ -1518,7 +1553,6 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   }
 
   priority_queue<GridState> beam;
-  uint64_t initial_hash = compute_zobrist_hash(inner_grid);
   beam.push({inner_grid, {}, initial_paired, initial_heuristic, initial_hash});
 
   GridState global_best = {
@@ -1564,8 +1598,8 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
     vector<GPUResult> gpu_results = gpu_search.evaluate_batch(
         grids_flat, num_states, valid_rotations, inner_n);
 
-    priority_queue<GridState> next_beam;
     unordered_set<uint64_t> global_visited;
+    priority_queue<GridState> next_beam;
 
     for (const auto &res : gpu_results) {
       if (res.paired_count == 0 && res.heuristic == 0)
@@ -1601,10 +1635,10 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
       }
     }
 
-    if (stuck_counter >= 4 && !solution_found) {
+    if (stuck_counter >= 6 && !solution_found) {
       for (int idx = 0; idx < num_states; ++idx) {
         GridState current = current_states[idx];
-        for (int k = 2; k < inner_n - 1; ++k) {
+        for (int k = 2; k <= inner_n - 1; ++k) {
           for (int i = 0; i <= inner_n - k; ++i) {
             for (int j = 0; j <= inner_n - k - 1; ++j) {
               if (Check_Valid(i + offset, j + offset, k - 1)) {
@@ -1639,35 +1673,31 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
       }
     }
 
-    if (stuck_counter >= 6) {
+    // ========== MODIFIED backtrack logic ==========
+    if (stuck_counter >= 6) // Increased from 5 to handle 16x16
+    {
       if (!state_history.empty()) {
         cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
         bool found_valid_backtrack = false;
         StateSnapshot backtrack_target;
 
-        while (!state_history.empty()) {
-          StateSnapshot candidate = state_history.back();
-          state_history.pop_back();
-          if (candidate.paired_count < best_paired_in_depth) {
-            int visit_count = paired_count_visits[candidate.paired_count];
-            if (visit_count < 2) {
-              backtrack_target = candidate;
-              found_valid_backtrack = true;
-              paired_count_visits[candidate.paired_count]++;
-              cout << "Backtrack target: " << backtrack_target.paired_count
-                   << " pairs\n";
-              break;
-            }
-          }
-        }
+        // Instead of searching backwards, pick the snapshot that is
+        // BACKTRACK_DEPTH steps before the end.
+        int target_idx =
+            max(0, (int)state_history.size() - 8); // Increased from 4 for 16x16
+        backtrack_target = state_history[target_idx];
+
+        // Remove all snapshots after this index so we don't revisit them.
+        state_history.resize(target_idx);
+        found_valid_backtrack = true;
 
         if (found_valid_backtrack) {
-          beam_multiplier = backtrack_target.beam_multiplier * 1.5;
+          beam_multiplier = 1.5; // set multiplier to 1.5 (not multiplied)
           next_beam = priority_queue<GridState>();
           for (const auto &state : backtrack_target.beam_states)
             next_beam.push(state);
-          backtrack_target.beam_multiplier = beam_multiplier;
-          state_history.push_back(backtrack_target);
+          // Optionally we could push the target back with updated multiplier,
+          // but since we truncated history, we can just continue.
           stuck_counter = 0;
           last_best_paired = backtrack_target.paired_count;
           best_paired_in_depth = backtrack_target.paired_count;
@@ -1680,6 +1710,12 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
             if (s.paired_count > best_cur.paired_count)
               best_cur = s;
           auto healed = unstuck_healing(best_cur, min(10, inner_n / 2));
+          // ===== new: if healing produced no states due to timeout, break
+          // =====
+          if (healed.empty()) {
+            cout << "Healing stopped due to timeout. Terminating search.\n";
+            break;
+          }
           int best_healed = 0;
           for (const auto &hs : healed) {
             next_beam.push(hs);
@@ -1698,6 +1734,10 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
           if (s.paired_count > best_cur.paired_count)
             best_cur = s;
         auto healed = unstuck_healing(best_cur, min(10, inner_n / 2));
+        if (healed.empty()) {
+          cout << "Healing stopped due to timeout. Terminating search.\n";
+          break;
+        }
         int best_healed = 0;
         for (const auto &hs : healed) {
           next_beam.push(hs);
@@ -1710,8 +1750,11 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
         stuck_counter = 0;
       }
     }
-
-    int current_beam_width = (int)(base_beam_width * beam_multiplier);
+    int desired_beam_width = base_beam_width;
+    if (depth < 40) {
+      desired_beam_width -= 1000;
+    }
+    int current_beam_width = (int)(desired_beam_width * beam_multiplier);
     beam = priority_queue<GridState>();
     int kept = 0;
     while (!next_beam.empty() && kept < current_beam_width) {
@@ -1742,9 +1785,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 }
 
 int main() {
+  init_zobrist();
   omp_set_num_threads(omp_get_max_threads());
   cout << "Using " << omp_get_max_threads() << " threads\n";
-  init_zobrist();
 
   vector<vector<uint16_t>> init_grid = get_random_board(24);
   vector<vector<uint16_t>> grid = init_grid;
@@ -1838,7 +1881,6 @@ int main() {
          << "\n";
 
     if (inner_paired < inner_target) {
-      start_time = high_resolution_clock::now();
       int max_search_depth = inner_n * inner_n * 2;
 
       // beam_search returns rotations already in GLOBAL coordinates
@@ -1875,6 +1917,12 @@ int main() {
   if (broke)
     cout << "-------------------------------------BROKE------------------------"
             "----------\n";
+
+  // ========== NEW: print total elapsed time ==========
+  auto end_time = high_resolution_clock::now();
+  duration<double> elapsed = end_time - start_time;
+  cout << "Total time used: " << elapsed.count() << " seconds\n";
+  // ===================================================
 
   return 0;
 }
