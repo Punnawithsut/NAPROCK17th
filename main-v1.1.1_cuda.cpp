@@ -40,6 +40,7 @@ bool broke = false;
 bool SET_FP = true;
 bool DEBUG = false;
 bool ext_pair = false;
+const int TEST_WITH_NAPROCK_REAL_SERVER = 1;
 
 // ── Zobrist Hashing ──
 static const int ZOBRIST_MAX_N = 64;
@@ -82,6 +83,42 @@ bool is_time_up() {
   auto now = high_resolution_clock::now();
   duration<double> elapsed = now - start_time;
   return elapsed.count() >= TIME_LIMIT;
+}
+
+json fetch_match_data(const string& url, const string& token) {
+    auto response = cpr::Get(cpr::Url{url + "/"},
+                             cpr::Parameters{{"token", token}});
+
+    if (response.status_code != 200) {
+        cerr << "Error fetching data! Status: " << response.status_code << endl;
+        cerr << "Server says: " << response.text << endl;
+        exit(1); // Exit if we can't get the board
+    }
+    return json::parse(response.text);
+}
+
+void submit_answer(const string& url, const string& token, const vector<Rotation>& path) {
+    json ops_json = json::array();
+    for (const auto& rot : path) {
+        ops_json.push_back({
+            {"x", rot.j}, // Column
+            {"y", rot.i}, // Row
+            {"n", rot.k}  // Square size
+        });
+    }
+
+    json body = {{"ops", ops_json}};
+
+    auto response = cpr::Post(cpr::Url{url + "/"},
+                              cpr::Header{{"Content-Type", "application/json"}},
+                              cpr::Parameters{{"token", token}},
+                              cpr::Body{body.dump()});
+
+    if (response.status_code == 200) {
+        cout << "Successfully submitted! Revision: " << json::parse(response.text)["revision"] << endl;
+    } else {
+        cerr << "Submission failed! " << response.text << endl;
+    }
 }
 
 vector<vector<uint16_t>> get_random_board(int n) {
@@ -1788,140 +1825,184 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   return global_best.path;
 }
 
-int main() {
-  omp_set_num_threads(omp_get_max_threads());
-  cout << "Using " << omp_get_max_threads() << " threads\n";
-  init_zobrist();
+int main()
+{
+    omp_set_num_threads(omp_get_max_threads());
+    cout << "Using " << omp_get_max_threads() << " threads\n";
 
-  vector<vector<uint16_t>> init_grid = get_random_board(24);
-  vector<vector<uint16_t>> grid = init_grid;
-  n = grid.size();
-  locked = vector<vector<uint8_t>>(n, vector<uint8_t>(n, 0));
-  vector<Rotation> full_path;
+    int on_comp = 0;
+    const string SERVER_URL = (on_comp == 1) ? "http://10.0.0.1:3000" : "http://localhost:3000";
+    const string TOKEN = "player1";
 
-  // ── Phase 1: File 1's frame-by-frame STEP_Do solver ──
-  for (int Fsize = n - cnt * 2; Fsize > 12; Fsize -= 4) {
-    vector<vector<uint16_t>> crop;
-    vector<Rotation> partial_path;
-    crop.reserve(n - cnt * 2);
+    vector<vector<uint16_t>> init_grid;
+    
+    if (on_comp == 1 || TEST_WITH_NAPROCK_REAL_SERVER) {
+        cout << "Using NAPROCK SERVER\n";
+        cout << "Checkpoint 1: Starting Connection..." << endl;
+        json match_json = fetch_match_data(SERVER_URL, TOKEN);
 
-    for (int i = cnt; i < n - cnt; i++) {
-      vector<uint16_t> row(grid[i].begin() + cnt, grid[i].end() - cnt);
-      crop.push_back(row);
-    }
+        cout << "Checkpoint 2: Data received!" << endl;
+        if (!match_json.contains("problem")) {
+            cout << "Checkpoint 3: No problem field found! Exiting." << endl;
+            return 0;
+        }
 
-    // First STEP_Do call (corner 1, part 1)
-    pair<vector<vector<uint16_t>>, vector<Rotation>> res =
-        STEP_Do(Fsize, crop, 0);
-    partial_path.insert(partial_path.end(), res.second.begin(),
-                        res.second.end());
+        cout << "Checkpoint 4: Problem found, starting solver..." << endl;
 
-    crop = rotate_submatrix(res.first, Fsize, 0, 0);
-    locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
-    partial_path.emplace_back(Fsize, cnt, cnt);
+        auto& field_obj = match_json["problem"]["field"];
 
-    // Loop through remaining corners (4 corners total, we already did the first
-    // STEP_Do)
-    for (int i = 0; i < 3; i++) {
+        n = field_obj["size"].get<int>(); 
+        cout << "Detected N = " << n << endl;
 
-      // Second STEP_Do of this corner pair (completes one corner)
-      auto res1 = STEP_Do(Fsize, crop, 0);
-      partial_path.insert(partial_path.end(), res1.second.begin(),
-                          res1.second.end());
+        auto& entities = field_obj["entities"];
 
-      auto res2 = STEP_Do(Fsize, res1.first, 2);
-      partial_path.insert(partial_path.end(), res2.second.begin(),
-                          res2.second.end());
+        init_grid.assign(n, vector<uint16_t>(n));
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                init_grid[i][j] = entities[i][j].get<uint16_t>();
+            }
+        }
 
-      crop = rotate_submatrix(res2.first, Fsize, 0, 0);
-      locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
-      partial_path.emplace_back(Fsize, cnt, cnt);
-    }
-
-    res = STEP_Do(Fsize, crop, 2);
-    partial_path.insert(partial_path.end(), res.second.begin(),
-                        res.second.end());
-
-    grid = apply_rotations(grid, partial_path);
-    full_path.insert(full_path.end(), partial_path.begin(), partial_path.end());
-
-    cout << "Current Frame cost :" << partial_path.size() << '\n';
-    cout << "Current Frame total cost :" << full_path.size() << '\n';
-    cout << "------------------------------------\n";
-    cout << "Locked: \n";
-    print_grid(locked);
-    cout << "crop (cnt = " << cnt << " ):\n";
-    print_grid(res.first);
-    cout << "grid: \n";
-    print_grid(grid);
-    cout << "------------------------------------\n";
-
-    cnt += 2;
-  }
-
-  // ── Phase 2: Beam search on the remaining inner block ──
-  // After the STEP_Do loop, cnt has been incremented so the remaining
-  // unsolved region is (n - cnt*2) x (n - cnt*2) starting at global offset cnt.
-  {
-    int inner_n = n - cnt * 2; // e.g. 12 for n=24 after 3 STEP_Do passes
-    int offset = cnt;          // global row/col offset of the inner block
-
-    // Extract the inner crop from the current global grid
-    vector<vector<uint16_t>> inner_grid;
-    inner_grid.reserve(inner_n);
-    for (int i = offset; i < offset + inner_n; i++) {
-      vector<uint16_t> row(grid[i].begin() + offset,
-                           grid[i].begin() + offset + inner_n);
-      inner_grid.push_back(row);
-    }
-
-    // Check how many pairs are already solved inside the inner block
-    int inner_paired = count_paired_values(inner_grid);
-    int inner_target = inner_n * inner_n / 2;
-
-    cout << "\n=== Beam Search on " << inner_n << "x" << inner_n
-         << " inner block (global offset=" << offset << ") ===\n";
-    cout << "Inner pairs solved: " << inner_paired << "/" << inner_target
-         << "\n";
-
-    if (inner_paired < inner_target) {
-      start_time = high_resolution_clock::now();
-      int max_search_depth = inner_n * inner_n * 2;
-
-      // beam_search returns rotations already in GLOBAL coordinates
-      vector<Rotation> beam_path =
-          beam_search(inner_grid, offset, max_search_depth);
-
-      grid = apply_rotations(grid, beam_path);
-      full_path.insert(full_path.end(), beam_path.begin(), beam_path.end());
-
-      // Verify the inner result
-      vector<vector<uint16_t>> inner_after;
-      for (int i = offset; i < offset + inner_n; i++) {
-        vector<uint16_t> r(grid[i].begin() + offset,
-                           grid[i].begin() + offset + inner_n);
-        inner_after.push_back(r);
-      }
-      cout << "After beam search inner pairs: "
-           << count_paired_values(inner_after) << "/" << inner_target << "\n";
+        cout << "GET SUCCESS (NAPROCK SERVER). Grid is ready!" << endl;
     } else {
-      cout << "Inner block already fully solved — beam search skipped.\n";
+        // Local Random Test
+        cout << "Use Pun's Server\n";
+        init_grid = get_random_board(24);
+        n = init_grid.size();
     }
-  }
 
-  // ── Results ──
-  cout << "-----------------  Before  -------------------\n";
-  print_grid(init_grid);
-  save_file(init_grid, full_path);
-  cout << "-----------------  After   -------------------\n";
-  init_grid = apply_rotations(init_grid, full_path);
-  print_grid(init_grid);
-  cout << "\nTotal ops: " << full_path.size() << "\n";
-  cout << "Solved: " << (is_solved(init_grid) ? "YES" : "NO") << "\n";
+    vector<vector<uint16_t>> grid = init_grid;
+    n = grid.size();
+    locked = vector<vector<uint8_t>>(n, vector<uint8_t>(n, 0));
+    vector<Rotation> full_path;
 
-  if (broke)
-    cout << "-------------------------------------BROKE------------------------"
-            "----------\n";
+    // ── Phase 1: File 1's frame-by-frame STEP_Do solver ──
+    for (int Fsize = n - cnt * 2; Fsize > 12; Fsize -= 4)
+    {
+        vector<vector<uint16_t>> crop;
+        vector<Rotation> partial_path;
+        crop.reserve(n - cnt * 2);
 
-  return 0;
+        for (int i = cnt; i < n - cnt; i++)
+        {
+            vector<uint16_t> row(grid[i].begin() + cnt, grid[i].end() - cnt);
+            crop.push_back(row);
+        }
+
+        // First STEP_Do call (corner 1, part 1)
+        pair<vector<vector<uint16_t>>, vector<Rotation>> res = STEP_Do(Fsize, crop, 0);
+        partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
+
+        crop = rotate_submatrix(res.first, Fsize, 0, 0);
+        locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
+        partial_path.emplace_back(Fsize, cnt, cnt);
+
+        // Loop through remaining corners (4 corners total, we already did the first STEP_Do)
+        for (int i = 0; i < 3; i++)
+        {
+
+            // Second STEP_Do of this corner pair (completes one corner)
+            auto res1 = STEP_Do(Fsize, crop, 0);
+            partial_path.insert(partial_path.end(), res1.second.begin(), res1.second.end());
+
+            auto res2 = STEP_Do(Fsize, res1.first, 2);
+            partial_path.insert(partial_path.end(), res2.second.begin(), res2.second.end());
+
+            crop = rotate_submatrix(res2.first, Fsize, 0, 0);
+            locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
+            partial_path.emplace_back(Fsize, cnt, cnt);
+        }
+
+        res = STEP_Do(Fsize, crop, 2);
+        partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
+
+        grid = apply_rotations(grid, partial_path);
+        full_path.insert(full_path.end(), partial_path.begin(), partial_path.end());
+
+        cout << "Current Frame cost :" << partial_path.size() << '\n';
+        cout << "Current Frame total cost :" << full_path.size() << '\n';
+        cout << "------------------------------------\n";
+        cout << "Locked: \n";
+        print_grid(locked);
+        cout << "crop (cnt = " << cnt << " ):\n";
+        print_grid(res.first);
+        cout << "grid: \n";
+        print_grid(grid);
+        cout << "------------------------------------\n";
+
+        cnt += 2;
+    }
+
+    // ── Phase 2: Beam search on the remaining inner block ──
+    // After the STEP_Do loop, cnt has been incremented so the remaining
+    // unsolved region is (n - cnt*2) x (n - cnt*2) starting at global offset cnt.
+    {
+        int inner_n = n - cnt * 2; // e.g. 12 for n=24 after 3 STEP_Do passes
+        int offset = cnt;          // global row/col offset of the inner block
+
+        // Extract the inner crop from the current global grid
+        vector<vector<uint16_t>> inner_grid;
+        inner_grid.reserve(inner_n);
+        for (int i = offset; i < offset + inner_n; i++)
+        {
+            vector<uint16_t> row(grid[i].begin() + offset,
+                                 grid[i].begin() + offset + inner_n);
+            inner_grid.push_back(row);
+        }
+
+        // Check how many pairs are already solved inside the inner block
+        int inner_paired = count_paired_values(inner_grid);
+        int inner_target = inner_n * inner_n / 2;
+
+        cout << "\n=== Beam Search on " << inner_n << "x" << inner_n
+             << " inner block (global offset=" << offset << ") ===\n";
+        cout << "Inner pairs solved: " << inner_paired << "/" << inner_target << "\n";
+
+        if (inner_paired < inner_target)
+        {
+            int max_search_depth = inner_n * inner_n * 2;
+
+            // beam_search returns rotations already in GLOBAL coordinates
+            vector<Rotation> beam_path = beam_search(inner_grid, offset, max_search_depth);
+
+            grid = apply_rotations(grid, beam_path);
+            full_path.insert(full_path.end(), beam_path.begin(), beam_path.end());
+
+            // Verify the inner result
+            vector<vector<uint16_t>> inner_after;
+            for (int i = offset; i < offset + inner_n; i++)
+            {
+                vector<uint16_t> r(grid[i].begin() + offset,
+                                   grid[i].begin() + offset + inner_n);
+                inner_after.push_back(r);
+            }
+            cout << "After beam search inner pairs: "
+                 << count_paired_values(inner_after) << "/" << inner_target << "\n";
+        }
+        else
+        {
+            cout << "Inner block already fully solved — beam search skipped.\n";
+        }
+    }
+
+    // ── Results ──
+    cout << "-----------------  Before  -------------------\n";
+    print_grid(init_grid);
+    save_file(init_grid, full_path);
+    cout << "-----------------  After   -------------------\n";
+    init_grid = apply_rotations(init_grid, full_path);
+    print_grid(init_grid);
+    cout << "\nTotal ops: " << full_path.size() << "\n";
+    cout << "Solved: " << (is_solved(init_grid) ? "YES" : "NO") << "\n";
+    auto end_time = high_resolution_clock::now();
+    duration<double> elapsed = end_time - start_time;
+    cout << "Total time used: " << elapsed.count() << " seconds\n"; 
+    if(TEST_WITH_NAPROCK_REAL_SERVER) {
+        submit_answer(SERVER_URL, TOKEN, full_path);
+    }
+
+    if (broke)
+        cout << "-------------------------------------BROKE----------------------------------\n";
+
+    return 0;
 }

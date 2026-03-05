@@ -1,8 +1,7 @@
 {
   "match": {
     "players": [
-      {"token": "player1", "name": "高専1"},
-      {"token": "player2", "name": "高専2"}
+      {"token": "player1", "name": "高専1"}
     ],
     "problem": {
       "field": [

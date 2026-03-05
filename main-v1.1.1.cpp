@@ -1872,14 +1872,14 @@ int main()
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " threads\n";
 
-    vector<vector<uint16_t>> init_grid = get_random_board(24);
+    vector<vector<uint16_t>> init_grid = get_random_board(4);
     vector<vector<uint16_t>> grid = init_grid;
     n = grid.size();
     locked = vector<vector<uint8_t>>(n, vector<uint8_t>(n, 0));
     vector<Rotation> full_path;
 
     // ── Phase 1: File 1's frame-by-frame STEP_Do solver ──
-    for (int Fsize = n - cnt * 2; Fsize > n / 2; Fsize -= 4)
+    for (int Fsize = n - cnt * 2; Fsize > 12; Fsize -= 4)
     {
         vector<vector<uint16_t>> crop;
         vector<Rotation> partial_path;
