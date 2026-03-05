@@ -1,16 +1,14 @@
 #pragma once
 
+#include "gpu_common.h"
 #include <cstdint>
-#include <memory>
 #include <tuple>
 #include <vector>
 
-#include "gpu_common.h"
-
-class MetalBeamSearch {
+class CudaBeamSearch {
 public:
-  MetalBeamSearch(int max_n, int max_states, int max_rotations);
-  ~MetalBeamSearch();
+  CudaBeamSearch(int max_n, int max_states, int max_rotations);
+  ~CudaBeamSearch();
 
   void set_zobrist_table(const uint64_t *flat_zobrist_table);
 
@@ -20,6 +18,12 @@ public:
                  int grid_size);
 
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl;
+  int max_n_;
+  int max_states_;
+  int max_rotations_;
+
+  uint16_t *d_grids_;
+  int *d_rotations_;
+  uint64_t *d_zobrist_;
+  GPUResult *d_results_;
 };

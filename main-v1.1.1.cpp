@@ -7,7 +7,16 @@
 #include <unordered_set>
 
 using namespace std;
+
+#ifdef USE_CUDA
+#include "cuda_beam_search.cuh"
+using GPUBeamSearch = CudaBeamSearch;
+#else
 #include "metal_beam_search.h"
+using GPUBeamSearch = MetalBeamSearch;
+#endif
+
+// Global constants & variables
 using namespace std::chrono;
 using json = nlohmann::json;
 
@@ -1497,7 +1506,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   int base_beam_width = 5000;
   double beam_multiplier = 1.0;
 
-  MetalBeamSearch gpu_search(inner_n, 30000, 5000);
+  GPUBeamSearch gpu_search(inner_n, 30000, 5000);
   gpu_search.set_zobrist_table(&zobrist_table[0][0][0]);
 
   int num_threads = omp_get_max_threads();

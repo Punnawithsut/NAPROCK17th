@@ -15,9 +15,17 @@ const int BACKTRACK_DEPTH = 10; // go back this many snapshots when stuck
 const int STUCK_LIMIT =
     6; // trigger backtrack after this many non-improving depths
 // ========================================================
+using namespace std;
 
+#ifdef USE_CUDA
+#include "cuda_beam_search.cuh"
+using GPUBeamSearch = CudaBeamSearch;
+#else
 #include "metal_beam_search.h"
+using GPUBeamSearch = MetalBeamSearch;
+#endif
 
+// Global constants & variables
 uint64_t zobrist_table[64][64][2048];
 
 void init_zobrist() {
@@ -1532,7 +1540,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   int base_beam_width = 5000;
   double beam_multiplier = 1.0;
 
-  MetalBeamSearch gpu_search(inner_n, 30000, 5000);
+  GPUBeamSearch gpu_search(inner_n, 30000, 5000);
   gpu_search.set_zobrist_table(&zobrist_table[0][0][0]);
 
   int num_threads = omp_get_max_threads();
