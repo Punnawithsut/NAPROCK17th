@@ -1208,7 +1208,7 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
 vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize, int PD = 0)
 {
     const int MAX_DEPTH = (Fsize + 7) / 8;
-    const int BEAM_WIDTH = 200;
+    const int BEAM_WIDTH = 100;
     int N = crop.size(); // = Fsize
 
     cout << "[PreBeam] Starting on " << N << "x" << N
@@ -1832,7 +1832,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
             }
         }
         int dbw = base_beam_width;
-        if(depth < 40) {
+        if(depth < 35) {
             dbw -= 1500;
         }
         int current_beam_width = (int)(dbw * beam_multiplier);
