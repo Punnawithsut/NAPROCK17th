@@ -1583,7 +1583,6 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 
   vector<StateSnapshot> state_history;
   unordered_map<int, int> paired_count_visits;
-
   for (; depth < max_depth && !beam.empty(); ++depth) {
     if (is_time_up()) {
       cout << "Time limit reached at depth " << depth << endl;
@@ -1620,11 +1619,11 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 
     priority_queue<GridState> next_beam;
     unordered_set<uint64_t> global_visited;
-
+    
     for (const auto &res : gpu_results) {
       if (res.paired_count == 0 && res.heuristic == 0)
-        continue;
-      if (res.paired_count < current_states[res.parent_idx].paired_count)
+        continue; 
+      if (res.paired_count < current_states[res.parent_idx].paired_count - 2)// more flexible
         continue;
 
       if (global_visited.find(res.hash) == global_visited.end()) {
@@ -1654,6 +1653,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
         next_beam.push(std::move(ns));
       }
     }
+    //cout<<gpu_results.size()<<' '<<next_beam.size()<<'\n';
 
     if (solution_found) {
       cout << "Solution found at depth " << depth << endl;
@@ -1683,7 +1683,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
       cout << " (stuck: " << stuck_counter << "/6)";
     }
     cout << "\n";
-
+    //int gpu_best_paired = best_paired_in_depth;
     if (stuck_counter >= 4 && !solution_found) {
       for (int idx = 0; idx < num_states; ++idx) {
         GridState current = current_states[idx];
@@ -1827,9 +1827,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
 
 int main()
 {
+    init_zobrist();
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " threads\n";
-
     int on_comp = 0;
     const string SERVER_URL = (on_comp == 1) ? "http://10.0.0.1:3000" : "http://localhost:3000";
     const string TOKEN = "player1";

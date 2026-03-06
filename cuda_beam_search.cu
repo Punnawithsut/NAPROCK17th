@@ -69,7 +69,7 @@ __global__ void evaluate_rotations_kernel(
         max_val = val;
 
       // ZOBRIST_MAX_N=64, ZOBRIST_MAX_VAL=2048
-      int z_idx = (r * 64 * 2048) + (c * 2048) + val;
+      long long z_idx = (r * 64 * 2048) + (c * 2048) + val;
       hash ^= zobrist_table[z_idx];
     }
   }

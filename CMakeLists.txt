@@ -32,10 +32,13 @@ if(USE_CUDA)
     add_executable(app_v111 main-v1.1.1.cpp      cuda_beam_search.cu)
     # ADD THE .cu FILE HERE TOO:
     add_executable(app_v120 main-v1.1.1_cuda.cpp cuda_beam_search.cu) 
+    add_executable(app_alter alter_main.cpp cuda_beam_search.cu)
+
 else()
     add_executable(app      main-v1.1.2.cpp)
     add_executable(app_v111 main-v1.1.1.cpp)
     add_executable(app_v120 main-v1.1.1_cuda.cpp)
+    add_executable(app_alter alter_main.cpp)
 endif()
 
 # 5. Optimization Flags & Linking
@@ -49,7 +52,7 @@ set(MSVC_OPTIMIZATIONS
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/GL>
 )
 
-foreach(target app app_v111 app_v120)
+foreach(target app app_v111 app_v120 app_alter)
     target_include_directories(${target} PRIVATE .)
     
     # Apply the optimizations safely
