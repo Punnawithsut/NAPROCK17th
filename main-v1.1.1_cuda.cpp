@@ -1561,7 +1561,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid,
   cout << "Initial paired: " << initial_paired << "/" << target_paired << "\n";
 
   vector<tuple<int, int, int>> valid_rotations;
-  for (int k = 2; k < inner_n - 1; ++k) {
+  for (int k = 2; k <= inner_n - 1; ++k) {
     for (int i = 0; i <= inner_n - k; ++i) {
       for (int j = 0; j <= inner_n - k; ++j) {
         if (Check_Valid(i + offset, j + offset, k - 1)) {
