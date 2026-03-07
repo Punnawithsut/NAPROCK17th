@@ -40,7 +40,7 @@ bool broke = false;
 bool SET_FP = true;
 bool DEBUG = false;
 bool ext_pair = false;
-const int TEST_WITH_NAPROCK_REAL_SERVER = 1;
+const int TEST_WITH_NAPROCK_REAL_SERVER = 0;
 
 // ── Zobrist Hashing ──
 static const int ZOBRIST_MAX_N = 64;
@@ -416,6 +416,8 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
             else sr.insert(crop[i][j]);
         }
     }
+    
+
 
     for (int j = local_cnt; j < N; j++)
         for (int i = mid_row_start; i < N; i++)
@@ -457,14 +459,13 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize, int PD)
 
         if (mode)
         {
-            if (row == mid_row_start) return 5;
             if (is_lower)
             {
                 if (is_right) return 1;
-                if (is_left) return 5;
+                if (is_left) return 4;
             }
             if (is_upper)
-                return (mid_row_start - 1 == row) ? 5 : 1;
+                return (mid_row_start - 1 == row) ? 4 : 1;
         }
         else
         {
@@ -479,7 +480,7 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize, int PD)
         return 1;
     };
 
-    int CUR_J = 0;
+    int CUR_J = PD;
     for (int j = PD; j < half;)
     {
         if (crop[mid_row_start][j] == crop[mid_row_end][j])
@@ -499,21 +500,28 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize, int PD)
     }
     if (CUR_J >= half) return 99999;
 
-    set<int> sr;
-    for (int i = mid_row_start; i < N - 1; i++)
-        for (int j = CUR_J; j < min(N - 1, CUR_J + Fsize / 4); j++)
+    set<int> sr, sl;
+    for (int k = 0 ; k < (N-CUR_J)/2; k++)
+    {
+        if (locked[cnt + mid_row_end+k][cnt + CUR_J]) continue;
+        sr.insert(crop[mid_row_end+k][CUR_J]);
+        if (locked[cnt + mid_row_end+k][cnt + CUR_J+1]) continue;
+        sl.insert(crop[mid_row_end+k][CUR_J+1]);
+    }
+    for (int k = 0 ; k < (N-CUR_J)/2; k++)
+    {
+        if (locked[cnt + mid_row_start][cnt + CUR_J+k]) continue;
+        if (auto search = sr.find(crop[mid_row_start][CUR_J+k]); search != sr.end())
         {
-            if (locked[cnt + i][cnt + j]) continue;
-            if (auto search = sr.find(crop[i][j]); search != sr.end())
-            {
-                pair<int, int> pos = find_pos(crop, i, j);
-                if (abs(pos.first - i) <= 1 || abs(pos.second - j) <= 1)
-                    score += 2;
-            }
-            else sr.insert(crop[i][j]);
+            score+=2;
         }
+        if (auto search = sl.find(crop[mid_row_start][CUR_J+k]); search != sl.end())
+        {
+            score+=2;
+        }
+    }
 
-    for (int j = CUR_J; j < N; j++)
+    for (int j = CUR_J; j < N-1; j++)
         for (int i = mid_row_start; i < N; i++)
         {
             if (locked[cnt + i][cnt + j]) continue;
@@ -524,7 +532,7 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize, int PD)
             }
         }
 
-    for (int i = mid_row_start - 1; i < N; i++)
+    for (int i = mid_row_start - 1; i < N-1; i++)
         for (int j = CUR_J; j < N; j++)
         {
             if (locked[cnt + i][cnt + j]) continue;
@@ -1217,7 +1225,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
 
         // Trim beam
         int dbw = base_beam_width;
-        if (depth < 10) dbw -= 2000;
+        if (depth < 16) dbw -= 2000;
         int current_beam_width = (int)(dbw * beam_multiplier);
         beam = priority_queue<GridState>();
         int kept = 0;
@@ -1304,7 +1312,7 @@ int main()
 #endif
 
     // ── Phase 1: Frame-by-frame STEP_Do solver ──
-    for (int Fsize = n - cnt * 2; Fsize > 10; Fsize -= 4)
+    for (int Fsize = n - cnt * 2; Fsize > 12; Fsize -= 4)
     {
         vector<vector<uint16_t>> crop;
         vector<Rotation> partial_path;
