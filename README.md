@@ -70,7 +70,10 @@ target_link_libraries(app PRIVATE cpr::cpr nlohmann_json::nlohmann_json)
 To build:
 
 ```powershell
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="PATH_TO_YOUR_VCPKG_TOOL_CHAIN"
+cmake -B build -S . `
+  -DCMAKE_TOOLCHAIN_FILE="$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+  -DUSE_CUDA=ON `
+  -A x64
 #PATH_TO_YOUR_VCPKG_TOOL_CHAIN = ~/vcpkg/scripts/buildsystems/vcpkg.cmake
 cmake --build build --config Release
 ```
