@@ -439,7 +439,7 @@ int weighted_free_pairs(const vector<vector<uint16_t>> &crop, int Fsize, int loc
     return score;
 }
 
-int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize,int PD)
+int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize, int PD)
 {
     int N = crop.size();
     int half = N / 2;
@@ -447,32 +447,30 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize,int PD)
     int mid_row_end = half - 1;
     int score = 0;
 
-    auto get_weight = [&](int row, int col, int mode) -> int
+    auto get_weight = [&](int row, int col, int mode,int CurJ) -> int
     {
+        int cur_half = (CurJ+N)>>1;
         bool is_upper = (row <= mid_row_start);
         bool is_lower = (row >= mid_row_end);
-        bool is_center = (col >= half - 2 && col <= half + 1);
-        bool is_right = (col >= half);
-        bool is_left = (col < half);
+        bool is_right = (col >= cur_half);
+        bool is_left = (col < cur_half);
 
         if (mode)
         {
             if (row == mid_row_start) return 5;
             if (is_lower)
             {
-                if (is_center) return 3;
                 if (is_right) return 1;
-                if (is_left) return 3;
+                if (is_left) return 5;
             }
             if (is_upper)
-                return (mid_row_start - 1 == row) ? 3 : 1;
+                return (mid_row_start - 1 == row) ? 5 : 1;
         }
         else
         {
             if (row == mid_row_end) return 7;
             if (is_lower)
             {
-                if (is_center) return 8;
                 if (is_right) return 4;
                 if (is_left) return 8;
             }
@@ -521,7 +519,7 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize,int PD)
             if (locked[cnt + i][cnt + j]) continue;
             if (j + 1 < N && !locked[cnt + i][cnt + j + 1] && crop[i][j] == crop[i][j + 1])
             {
-                score += get_weight(i, j, 0);
+                score += get_weight(i, j, 0,CUR_J);
                 break;
             }
         }
@@ -531,72 +529,124 @@ int weighted_beam_DO(const vector<vector<uint16_t>> &crop, int Fsize,int PD)
         {
             if (locked[cnt + i][cnt + j]) continue;
             if (i + 1 < N && !locked[cnt + i + 1][cnt + j] && crop[i][j] == crop[i + 1][j])
-                score += get_weight(i, j, 1);
+                score += get_weight(i, j, 1,CUR_J);
         }
 
     return score;
 }
 
-vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize, int PD = 0)
+// ── Pre-step beam search (GPU-accelerated) ────────────────────────────────────
+vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop,
+                                       int Fsize, int PD,
+                                       GPUBeamSearch &gpu_search)
 {
-    const int MAX_DEPTH = 2;
+    const int MAX_DEPTH  = 2;
     const int BEAM_WIDTH = 100;
-    int N = crop.size();
+    const int N          = (int)crop.size();
 
     cout << "[PreBeam] Starting on " << N << "x" << N
          << " crop (cnt=" << cnt << ", Fsize=" << Fsize << ")\n";
 
-    struct CropState
-    {
+    struct CropState {
         vector<vector<uint16_t>> grid;
-        vector<Rotation> path;
-        int score;
+        vector<Rotation>         path;
+        int                      score;
     };
 
-    auto make_score = [&](const vector<vector<uint16_t>> &g) { return weighted_free_pairs(g, Fsize, PD); };
+    // Pre-compute valid rotations in local crop coordinates
+    vector<tuple<int,int,int>> valid_rots;
+    for (int k = 2; k <= N / 2; ++k)
+        for (int r = 0; r <= N - k; ++r)
+            for (int c = 0; c <= N - k; ++c)
+                if (Check_Valid(r + cnt, c + cnt, k - 1))
+                    valid_rots.emplace_back(k, r, c);
 
-    int init_score = make_score(crop);
+#ifdef USE_CUDA
+    const bool use_gpu = (N <= CCB_MAX_N);
+    if (!use_gpu)
+        cout << "[PreBeam] N=" << N << " > CCB_MAX_N=" << CCB_MAX_N << " — CPU fallback.\n";
+#else
+    const bool use_gpu = false;
+#endif
+
+    auto cpu_score = [&](const vector<vector<uint16_t>> &g) {
+        return weighted_free_pairs(g, Fsize, PD);
+    };
+
+    int init_score = cpu_score(crop);
     cout << "[PreBeam] Initial weighted free-pair score: " << init_score << "\n";
 
-    vector<CropState> beam = {{crop, {}, init_score}};
+    vector<CropState> beam      = {{crop, {}, init_score}};
     vector<CropState> best_seen = beam;
-    int best_score = init_score;
+    int               best_score = init_score;
 
-    for (int depth = 0; depth < MAX_DEPTH; depth++)
+    for (int depth = 0; depth < MAX_DEPTH; ++depth)
     {
         vector<CropState> next_beam;
-#pragma omp parallel
+
+#ifdef USE_CUDA
+        if (use_gpu)
         {
-            vector<CropState> local_next;
-#pragma omp for schedule(dynamic) nowait
-            for (int bi = 0; bi < (int)beam.size(); bi++)
+            const int S = (int)beam.size();
+            vector<uint16_t> flat(S * N * N);
+            for (int s = 0; s < S; ++s)
+                for (int r = 0; r < N; ++r)
+                    for (int c = 0; c < N; ++c)
+                        flat[s * N * N + r * N + c] = beam[s].grid[r][c];
+
+            // mode 0 = weighted_free_pairs
+            auto results = gpu_search.evaluate_crop(flat, S, N, valid_rots,
+                                                    cnt, Fsize, PD, /*mode=*/0);
+            next_beam.reserve(results.size());
+            for (const auto &res : results)
             {
-                const auto &cur = beam[bi];
-                for (int k = 2; k <= N / 2; k++)
-                    for (int r = 0; r <= N - k; r++)
-                        for (int c = 0; c <= N - k; c++)
-                        {
-                            if (!Check_Valid(r + cnt, c + cnt, k - 1)) continue;
-                            vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                            int new_score = make_score(new_grid);
-                            vector<Rotation> new_path = cur.path;
-                            new_path.emplace_back(k, r, c);
-                            local_next.push_back({new_grid, new_path, new_score});
-                        }
+                const auto &[k, r, c] = valid_rots[res.rot_idx];
+                CropState ns;
+                ns.grid  = rotate_submatrix(beam[res.parent_idx].grid, k, r, c);
+                ns.path  = beam[res.parent_idx].path;
+                ns.path.emplace_back(k, r, c);
+                ns.score = res.score;
+                next_beam.push_back(std::move(ns));
             }
+        }
+        else
+#endif
+        {
+#pragma omp parallel
+            {
+                vector<CropState> local_next;
+#pragma omp for schedule(dynamic) nowait
+                for (int bi = 0; bi < (int)beam.size(); bi++)
+                {
+                    const auto &cur = beam[bi];
+                    for (int k = 2; k <= N / 2; k++)
+                        for (int r = 0; r <= N - k; r++)
+                            for (int c = 0; c <= N - k; c++)
+                            {
+                                if (!Check_Valid(r + cnt, c + cnt, k - 1)) continue;
+                                auto new_grid  = rotate_submatrix(cur.grid, k, r, c);
+                                int  new_score = cpu_score(new_grid);
+                                auto new_path  = cur.path;
+                                new_path.emplace_back(k, r, c);
+                                local_next.push_back({new_grid, new_path, new_score});
+                            }
+                }
 #pragma omp critical
-            { next_beam.insert(next_beam.end(), local_next.begin(), local_next.end()); }
+                { next_beam.insert(next_beam.end(), local_next.begin(), local_next.end()); }
+            }
         }
 
         if (next_beam.empty()) break;
-        sort(next_beam.begin(), next_beam.end(), [](const CropState &a, const CropState &b) { return a.score > b.score; });
+
+        sort(next_beam.begin(), next_beam.end(),
+             [](const CropState &a, const CropState &b) { return a.score > b.score; });
         if ((int)next_beam.size() > BEAM_WIDTH) next_beam.resize(BEAM_WIDTH);
         beam = std::move(next_beam);
 
         if (beam[0].score > best_score)
         {
             best_score = beam[0].score;
-            best_seen = {beam[0]};
+            best_seen  = {beam[0]};
             cout << "[PreBeam] Depth " << depth + 1 << ": improved score to " << best_score << "\n";
         }
         else
@@ -614,75 +664,128 @@ vector<Rotation> pre_step_beam_search(const vector<vector<uint16_t>> &crop, int 
     return global_path;
 }
 
-vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop, int Fsize,int PD)
+// ── Do-step beam search (GPU-accelerated) ─────────────────────────────────────
+vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
+                                      int Fsize, int PD,
+                                      GPUBeamSearch &gpu_search)
 {
-    const int MAX_DEPTH = Fsize;
-    const int BEAM_WIDTH = 100;
-    int N = crop.size();
+    const int MAX_DEPTH  = Fsize;
+    const int BEAM_WIDTH = 125 + 10 * cnt;
+    const int N          = (int)crop.size();
 
     cout << "[DoBeam] Starting on " << N << "x" << N
          << " crop (cnt=" << cnt << ", Fsize=" << Fsize << ")\n";
 
-    struct CropState
-    {
+    struct CropState {
         vector<vector<uint16_t>> grid;
-        vector<Rotation> path;
-        int score;
+        vector<Rotation>         path;
+        int                      score;
     };
 
-    auto make_score = [&](const vector<vector<uint16_t>> &g) { return weighted_beam_DO(g, Fsize,PD); };
+    // Pre-compute valid rotations (k <= min(12, N-1))
+    vector<tuple<int,int,int>> valid_rots;
+    for (int k = 2; k <= min(12, N - 1); ++k)
+        for (int r = 0; r <= N - k; ++r)
+            for (int c = 0; c <= N - k; ++c)
+                if (Check_Valid(r + cnt, c + cnt, k - 1))
+                    valid_rots.emplace_back(k, r, c);
 
-    int init_score = make_score(crop);
+#ifdef USE_CUDA
+    const bool use_gpu = (N <= CCB_MAX_N);
+    if (!use_gpu)
+        cout << "[DoBeam] N=" << N << " > CCB_MAX_N=" << CCB_MAX_N << " — CPU fallback.\n";
+#else
+    const bool use_gpu = false;
+#endif
+
+    auto cpu_score = [&](const vector<vector<uint16_t>> &g) {
+        return weighted_beam_DO(g, Fsize, PD);
+    };
+
+    int  init_score = cpu_score(crop);
     cout << "[DoBeam] Initial weighted free-pair score: " << init_score << "\n";
 
-    vector<CropState> beam = {{crop, {}, init_score}};
+    vector<CropState> beam      = {{crop, {}, init_score}};
     vector<CropState> best_seen = beam;
-    int best_score = init_score;
-    bool bk = false;
+    int               best_score = init_score;
+    bool              bk         = false;
 
     for (int depth = 0; depth < MAX_DEPTH; depth++)
     {
         vector<CropState> next_beam;
-#pragma omp parallel
+
+#ifdef USE_CUDA
+        if (use_gpu)
         {
-            vector<CropState> local_next;
-#pragma omp for schedule(dynamic) nowait
-            for (int bi = 0; bi < (int)beam.size(); bi++)
+            const int S = (int)beam.size();
+            vector<uint16_t> flat(S * N * N);
+            for (int s = 0; s < S; ++s)
+                for (int r = 0; r < N; ++r)
+                    for (int c = 0; c < N; ++c)
+                        flat[s * N * N + r * N + c] = beam[s].grid[r][c];
+
+            // mode 1 = weighted_beam_DO
+            auto results = gpu_search.evaluate_crop(flat, S, N, valid_rots,
+                                                    cnt, Fsize, PD, /*mode=*/1);
+            next_beam.reserve(results.size());
+            for (const auto &res : results)
             {
-                const auto &cur = beam[bi];
-                for (int k = 2; k <= min(12, N - 1); k++)
+                const auto &[k, r, c] = valid_rots[res.rot_idx];
+                CropState ns;
+                ns.grid  = rotate_submatrix(beam[res.parent_idx].grid, k, r, c);
+                ns.path  = beam[res.parent_idx].path;
+                ns.path.emplace_back(k, r, c);
+                ns.score = res.score;
+                next_beam.push_back(std::move(ns));
+                if (ns.score >= 99999) { bk = true; break; }
+            }
+        }
+        else
+#endif
+        {
+#pragma omp parallel
+            {
+                vector<CropState> local_next;
+#pragma omp for schedule(dynamic) nowait
+                for (int bi = 0; bi < (int)beam.size(); bi++)
                 {
-                    for (int r = 0; r <= N - k; r++)
+                    const auto &cur = beam[bi];
+                    for (int k = 2; k <= min(12, N - 1); k++)
                     {
-                        for (int c = 0; c <= N - k; c++)
+                        for (int r = 0; r <= N - k; r++)
                         {
-                            if (!Check_Valid(r + cnt, c + cnt, k - 1)) continue;
-                            vector<vector<uint16_t>> new_grid = rotate_submatrix(cur.grid, k, r, c);
-                            int new_score = make_score(new_grid);
-                            vector<Rotation> new_path = cur.path;
-                            new_path.emplace_back(k, r, c);
-                            local_next.push_back({new_grid, new_path, new_score});
-                            if (new_score >= 99999) { bk = true; break; }
+                            for (int c = 0; c <= N - k; c++)
+                            {
+                                if (!Check_Valid(r + cnt, c + cnt, k - 1)) continue;
+                                auto new_grid  = rotate_submatrix(cur.grid, k, r, c);
+                                int  new_score = cpu_score(new_grid);
+                                auto new_path  = cur.path;
+                                new_path.emplace_back(k, r, c);
+                                local_next.push_back({new_grid, new_path, new_score});
+                                if (new_score >= 99999) { bk = true; break; }
+                            }
+                            if (bk) break;
                         }
                         if (bk) break;
                     }
                     if (bk) break;
                 }
-                if (bk) break;
-            }
 #pragma omp critical
-            { next_beam.insert(next_beam.end(), local_next.begin(), local_next.end()); }
+                { next_beam.insert(next_beam.end(), local_next.begin(), local_next.end()); }
+            }
         }
 
         if (next_beam.empty()) break;
-        sort(next_beam.begin(), next_beam.end(), [](const CropState &a, const CropState &b) { return a.score > b.score; });
+
+        sort(next_beam.begin(), next_beam.end(),
+             [](const CropState &a, const CropState &b) { return a.score > b.score; });
         if ((int)next_beam.size() > BEAM_WIDTH) next_beam.resize(BEAM_WIDTH);
         beam = std::move(next_beam);
 
         if (beam[0].score > best_score)
         {
             best_score = beam[0].score;
-            best_seen = {beam[0]};
+            best_seen  = {beam[0]};
             cout << "[DoBeam] Depth " << depth + 1 << ": improved score to " << best_score << "\n";
         }
         else
@@ -701,25 +804,32 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop, int F
     return global_path;
 }
 
-pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode)
+pair<vector<vector<uint16_t>>, vector<Rotation>>
+STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode, GPUBeamSearch &gpu_search)
 {
     int half = Fsize / 2;
-    int row = half - 2;
+    int row  = half - 2;
 
     cout << "\n=== Beam search prep (Fsize=" << Fsize << ") ===\n";
-    vector<Rotation> pre_path = pre_step_beam_search(grid, Fsize,mode);
-    if (!pre_path.empty())
-    {
-        vector<Rotation> local_path;
-        local_path.reserve(pre_path.size());
-        for (const auto &rot : pre_path)
-            local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
-        grid = apply_rotations(grid, local_path);
-        cout << "Applied " << pre_path.size() << " rotations\n";
-    }
-    cout << "==========================================\n\n";
 
-    vector<Rotation> Do_path = Do_step_beam_search(grid, Fsize,mode);
+    // vector<Rotation> pre_path = pre_step_beam_search(grid, Fsize, mode, gpu_search);
+    // if (!pre_path.empty())
+    // {
+    //     vector<Rotation> local_path;
+    //     local_path.reserve(pre_path.size());
+    //     for (const auto &rot : pre_path)
+    //         local_path.emplace_back(rot.k, rot.i - cnt, rot.j - cnt);
+    //     grid = apply_rotations(grid, local_path);
+    //     cout << "Applied " << pre_path.size() << " rotations\n";
+    // }
+    // cout << "==========================================\n\n";
+    vector<Rotation> pre_path;
+    // Sync locked state to GPU before Do_step (pre_step may have changed it)
+#ifdef USE_CUDA
+    gpu_search.update_locked(locked, n);
+#endif
+
+    vector<Rotation> Do_path = Do_step_beam_search(grid, Fsize, mode, gpu_search);
     if (!Do_path.empty())
     {
         vector<Rotation> local_path;
@@ -732,12 +842,12 @@ pair<vector<vector<uint16_t>>, vector<Rotation>> STEP_Do(int Fsize, vector<vecto
 
     for (int j = 0; j < half; j++)
     {
-        locked[cnt + row][cnt + j] = 1;
+        locked[cnt + row][cnt + j]     = 1;
         locked[cnt + row + 1][cnt + j] = 1;
     }
     pre_path.insert(pre_path.end(), Do_path.begin(), Do_path.end());
     locked = rotate_submatrix_u8(locked, half, cnt, cnt);
-    grid = rotate_submatrix(grid, half, 0, 0);
+    grid   = rotate_submatrix(grid, half, 0, 0);
     pre_path.emplace_back(half, cnt, cnt);
     cout << "Rotate half\n";
 
@@ -787,7 +897,7 @@ vector<GridState> unstuck_healing(const GridState &stuck_state, int num_random_m
         }
         else if (attempt < 12)
         {
-            int num_macro_cycles = num_random_moves / 2;
+            int num_macro_cycles  = num_random_moves / 2;
             int num_regular_moves = num_random_moves - (num_macro_cycles * 8);
             for (int cycle = 0; cycle < num_macro_cycles; cycle++)
             {
@@ -826,7 +936,7 @@ vector<GridState> unstuck_healing(const GridState &stuck_state, int num_random_m
             }
         }
 
-        int new_paired = count_paired_values(current_grid);
+        int new_paired    = count_paired_values(current_grid);
         int new_heuristic = calculate_manhattan_heuristic(current_grid);
         uint64_t new_hash = compute_zobrist_hash(current_grid);
         healed_states.push_back({current_grid, current_path, new_paired, new_heuristic, new_hash});
@@ -842,19 +952,19 @@ vector<GridState> unstuck_healing(const GridState &stuck_state, int num_random_m
     return healed_states;
 }
 
-vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int offset, int max_depth)
+vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int offset,
+                              int max_depth, GPUBeamSearch &gpu_search)
 {
-    int inner_n = inner_grid.size();
+    int inner_n       = inner_grid.size();
     int target_paired = inner_n * inner_n / 2;
 
-    int initial_paired = count_paired_values(inner_grid);
+    int initial_paired    = count_paired_values(inner_grid);
     int initial_heuristic = calculate_manhattan_heuristic(inner_grid);
     uint64_t initial_hash = compute_zobrist_hash(inner_grid);
 
-    int base_beam_width = 4000;
+    int    base_beam_width = 4000;
     double beam_multiplier = 1.0;
 
-    GPUBeamSearch gpu_search(inner_n, 30000, 5000);
     gpu_search.set_zobrist_table(&zobrist_table[0][0][0]);
 
     int num_threads = omp_get_max_threads();
@@ -876,13 +986,12 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
 
     GridState global_best = {inner_grid, {}, initial_paired, initial_heuristic, initial_hash};
     int depth = 0;
-    int stuck_counter = 0;
+    int stuck_counter    = 0;
     int last_best_paired = initial_paired;
 
     vector<StateSnapshot> state_history;
     unordered_map<int, int> paired_count_visits;
 
-    // global_visited persists across depths — prevents re-exploring old boards
     unordered_set<uint64_t> global_visited;
     global_visited.insert(initial_hash);
 
@@ -913,13 +1022,12 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
             grids_flat, num_states, valid_rotations, inner_n);
 
         priority_queue<GridState> next_beam;
-        int best_paired_in_depth = 0;
-        bool solution_found = false;
+        int  best_paired_in_depth = 0;
+        bool solution_found       = false;
         vector<Rotation> solution_path;
 
         for (const auto &res : gpu_results)
         {
-            // Allow up to 2 steps of regression so beam doesn't collapse
             if (res.paired_count < current_states[res.parent_idx].paired_count - 2)
                 continue;
 
@@ -935,8 +1043,8 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 ns.grid = rotate_submatrix(ns.grid, k, i, j);
                 ns.path.emplace_back(k, i, j);
                 ns.paired_count = res.paired_count;
-                ns.heuristic = res.heuristic;
-                ns.hash = res.hash;
+                ns.heuristic    = res.heuristic;
+                ns.hash         = res.hash;
 
                 if (ns.paired_count > best_paired_in_depth)
                     best_paired_in_depth = ns.paired_count;
@@ -946,7 +1054,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 if (is_solved(ns.grid))
                 {
                     solution_found = true;
-                    solution_path = ns.path;
+                    solution_path  = ns.path;
                     break;
                 }
                 next_beam.push(std::move(ns));
@@ -960,11 +1068,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
             return solution_path;
         }
 
-        // Status
         cout << "Depth " << depth << ": " << current_states.size()
              << " states, best paired: " << best_paired_in_depth << "/" << target_paired;
 
-        // Snapshot gpu_best BEFORE stuck handling inflates best_paired_in_depth
         int gpu_best_paired = best_paired_in_depth;
 
         if (best_paired_in_depth > last_best_paired)
@@ -1016,7 +1122,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                                         if (is_solved(macro_grid))
                                         {
                                             solution_found = true;
-                                            solution_path = macro_path;
+                                            solution_path  = macro_path;
                                             break;
                                         }
                                         next_beam.push({macro_grid, macro_path, macro_paired, macro_heuristic, mk});
@@ -1033,7 +1139,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
             if (!state_history.empty())
             {
                 cout << "\n!!! BACKTRACKING TRIGGERED !!!" << endl;
-                bool found_valid_backtrack = false;
+                bool          found_valid_backtrack = false;
                 StateSnapshot backtrack_target;
 
                 while (!state_history.empty())
@@ -1044,7 +1150,7 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                     {
                         if (paired_count_visits[candidate.paired_count] < 2)
                         {
-                            backtrack_target = candidate;
+                            backtrack_target      = candidate;
                             found_valid_backtrack = true;
                             paired_count_visits[candidate.paired_count]++;
                             cout << "Backtrack target: " << backtrack_target.paired_count << " pairs\n";
@@ -1056,13 +1162,13 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 if (found_valid_backtrack)
                 {
                     beam_multiplier = backtrack_target.beam_multiplier * 1.5;
-                    next_beam = priority_queue<GridState>();
+                    next_beam       = priority_queue<GridState>();
                     for (const auto &state : backtrack_target.beam_states)
                         next_beam.push(state);
                     backtrack_target.beam_multiplier = beam_multiplier;
                     state_history.push_back(backtrack_target);
-                    stuck_counter    = 0;
-                    last_best_paired = backtrack_target.paired_count;
+                    stuck_counter        = 0;
+                    last_best_paired     = backtrack_target.paired_count;
                     best_paired_in_depth = backtrack_target.paired_count;
                     cout << "Backtracking done. Beam multiplier: " << beam_multiplier << "\n";
                 }
@@ -1071,10 +1177,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                     cout << "No valid backtrack. Healing...\n";
                     GridState best_cur = current_states[0];
                     for (const auto &s : current_states)
-                        if (s.paired_count > best_cur.paired_count)
-                            best_cur = s;
-                    auto healed = unstuck_healing(best_cur, min(10, inner_n / 2));
-                    int best_healed = 0;
+                        if (s.paired_count > best_cur.paired_count) best_cur = s;
+                    auto healed     = unstuck_healing(best_cur, min(10, inner_n / 2));
+                    int  best_healed = 0;
                     for (const auto &hs : healed)
                     {
                         next_beam.push(hs);
@@ -1093,10 +1198,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
                 cout << "STUCK — no history. Healing...\n";
                 GridState best_cur = current_states[0];
                 for (const auto &s : current_states)
-                    if (s.paired_count > best_cur.paired_count)
-                        best_cur = s;
-                auto healed = unstuck_healing(best_cur, min(10, inner_n / 2));
-                int best_healed = 0;
+                    if (s.paired_count > best_cur.paired_count) best_cur = s;
+                auto healed     = unstuck_healing(best_cur, min(10, inner_n / 2));
+                int  best_healed = 0;
                 for (const auto &hs : healed)
                 {
                     next_beam.push(hs);
@@ -1111,9 +1215,9 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
             }
         }
 
-        // Trim beam — use gpu_best_paired (not inflated by macro/healing)
+        // Trim beam
         int dbw = base_beam_width;
-        if (depth < 35) dbw -= 2000;
+        if (depth < 10) dbw -= 2000;
         int current_beam_width = (int)(dbw * beam_multiplier);
         beam = priority_queue<GridState>();
         int kept = 0;
@@ -1143,13 +1247,13 @@ vector<Rotation> beam_search(const vector<vector<uint16_t>> &inner_grid, int off
 
 int main()
 {
-    init_zobrist();  // Must be first — initializes Zobrist table before any hashing
+    init_zobrist();
     omp_set_num_threads(omp_get_max_threads());
     cout << "Using " << omp_get_max_threads() << " threads\n";
 
     int on_comp = 0;
     const string SERVER_URL = (on_comp == 1) ? "http://10.0.0.1:3000" : "http://localhost:3000";
-    const string TOKEN = "player1";
+    const string TOKEN      = "player1";
 
     vector<vector<uint16_t>> init_grid;
 
@@ -1187,12 +1291,20 @@ int main()
     }
 
     vector<vector<uint16_t>> grid = init_grid;
-    n = grid.size();
+    n      = grid.size();
     locked = vector<vector<uint8_t>>(n, vector<uint8_t>(n, 0));
+
     vector<Rotation> full_path;
 
+    // Single gpu_search instance shared across Phase 1 and Phase 2
+    GPUBeamSearch gpu_search(n, 30000, 5000);
+    gpu_search.set_zobrist_table(&zobrist_table[0][0][0]);
+#ifdef USE_CUDA
+    gpu_search.update_locked(locked, n);   // initial: all zeros
+#endif
+
     // ── Phase 1: Frame-by-frame STEP_Do solver ──
-    for (int Fsize = n - cnt * 2; Fsize > 8; Fsize -= 4)
+    for (int Fsize = n - cnt * 2; Fsize > 10; Fsize -= 4)
     {
         vector<vector<uint16_t>> crop;
         vector<Rotation> partial_path;
@@ -1204,38 +1316,43 @@ int main()
             crop.push_back(row);
         }
 
-        pair<vector<vector<uint16_t>>, vector<Rotation>> res = STEP_Do(Fsize, crop, 0);
+        pair<vector<vector<uint16_t>>, vector<Rotation>> res =
+            STEP_Do(Fsize, crop, 0, gpu_search);
         partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
 
-        crop = rotate_submatrix(res.first, Fsize, 0, 0);
+        crop   = rotate_submatrix(res.first, Fsize, 0, 0);
         locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
         partial_path.emplace_back(Fsize, cnt, cnt);
 
         for (int i = 0; i < 3; i++)
         {
-            auto res1 = STEP_Do(Fsize, crop, 0);
+            auto res1 = STEP_Do(Fsize, crop, 0, gpu_search);
             partial_path.insert(partial_path.end(), res1.second.begin(), res1.second.end());
 
-            auto res2 = STEP_Do(Fsize, res1.first, 2);
+            auto res2 = STEP_Do(Fsize, res1.first, 2, gpu_search);
             partial_path.insert(partial_path.end(), res2.second.begin(), res2.second.end());
 
-            crop = rotate_submatrix(res2.first, Fsize, 0, 0);
+            crop   = rotate_submatrix(res2.first, Fsize, 0, 0);
             locked = rotate_submatrix_u8(locked, Fsize, cnt, cnt);
             partial_path.emplace_back(Fsize, cnt, cnt);
+
+#ifdef USE_CUDA
+            gpu_search.update_locked(locked, n);   // sync after each frame rotation
+#endif
         }
 
-        res = STEP_Do(Fsize, crop, 2);
+        res = STEP_Do(Fsize, crop, 2, gpu_search);
         partial_path.insert(partial_path.end(), res.second.begin(), res.second.end());
 
         grid = apply_rotations(grid, partial_path);
         full_path.insert(full_path.end(), partial_path.begin(), partial_path.end());
 
-        cout << "Current Frame cost :" << partial_path.size() << '\n';
-        cout << "Current Frame total cost :" << full_path.size() << '\n';
+        cout << "Current Frame cost :"       << partial_path.size() << '\n';
+        cout << "Current Frame total cost :" << full_path.size()    << '\n';
         cout << "------------------------------------\n";
-        cout << "Locked: \n"; print_grid(locked);
+        cout << "Locked: \n";    print_grid(locked);
         cout << "crop (cnt = " << cnt << " ):\n"; print_grid(res.first);
-        cout << "grid: \n"; print_grid(grid);
+        cout << "grid: \n";      print_grid(grid);
         cout << "------------------------------------\n";
 
         cnt += 2;
@@ -1244,7 +1361,7 @@ int main()
     // ── Phase 2: GPU Beam Search on remaining inner block ──
     {
         int inner_n = n - cnt * 2;
-        int offset = cnt;
+        int offset  = cnt;
 
         vector<vector<uint16_t>> inner_grid;
         inner_grid.reserve(inner_n);
@@ -1263,8 +1380,8 @@ int main()
 
         if (inner_paired < inner_target)
         {
-            int max_search_depth = inner_n * inner_n * 2;
-            vector<Rotation> beam_path = beam_search(inner_grid, offset, max_search_depth);
+            int max_search_depth    = inner_n * inner_n * 2;
+            vector<Rotation> beam_path = beam_search(inner_grid, offset, max_search_depth, gpu_search);
 
             grid = apply_rotations(grid, beam_path);
             full_path.insert(full_path.end(), beam_path.begin(), beam_path.end());
