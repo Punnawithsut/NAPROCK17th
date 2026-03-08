@@ -721,7 +721,7 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
 
     // Pre‑compute valid rotations (unchanged)
     vector<tuple<int, int, int>> valid_rots;
-    for (int k = 2; k <= min(12, N - 1); ++k)
+    for (int k = 2; k <= min(14, N - 1); ++k)
         for (int r = 0; r <= N - k; ++r)
             for (int c = 0; c <= N - k; ++c)
                 if (Check_Valid(r + cnt, c + cnt, k - 1))
@@ -758,8 +758,6 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
         cout << "[DoBeam] Trying depth limit " << depth_limit << "\n";
 
         vector<CropState> beam = {{crop, {}, init_score}};
-        vector<CropState> best_seen = beam;
-        int best_score = init_score;
         bool solution_found = false;
         vector<CropState> solutions; // states with score >= 99999
 
@@ -811,7 +809,7 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
                     for (int bi = 0; bi < (int)beam.size(); ++bi)
                     {
                         const auto &cur = beam[bi];
-                        for (int k = 2; k <= min(12, N - 1); ++k)
+                        for (int k = 2; k <= min(14, N - 1); ++k)
                             for (int r = 0; r <= N - k; ++r)
                                 for (int c = 0; c <= N - k; ++c)
                                 {
@@ -836,24 +834,8 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
             if (candidates.empty())
                 break;
 
-            // ─── Pareto filtering (idea 3) ───────────────────────────
-            vector<CropState> pareto;
-            // Sort by score descending
+            // ─── Select top BEAM_WIDTH by effective score (idea 2) ──────
             sort(candidates.begin(), candidates.end(),
-                 [](const CropState &a, const CropState &b)
-                 { return a.score > b.score; });
-            int min_path = INT_MAX;
-            for (const auto &s : candidates)
-            {
-                if (s.path.size() < min_path)
-                {
-                    pareto.push_back(s);
-                    min_path = s.path.size();
-                }
-            }
-
-            // Sort Pareto‑optimal states by effective score (score - α·path.size())
-            sort(pareto.begin(), pareto.end(),
                  [&](const CropState &a, const CropState &b)
                  {
                      double ea = effective(a);
@@ -862,10 +844,10 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
                          return ea > eb;
                      return a.path.size() < b.path.size(); // tie‑breaker
                  });
-            if ((int)pareto.size() > BEAM_WIDTH)
-                pareto.resize(BEAM_WIDTH);
+            if ((int)candidates.size() > BEAM_WIDTH)
+                candidates.resize(BEAM_WIDTH);
 
-            beam = std::move(pareto);
+            beam = std::move(candidates);
 
             // ─── Check for solutions and update best seen ───────────
             for (const auto &s : beam)
@@ -874,15 +856,6 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
                 {
                     solutions.push_back(s);
                     solution_found = true;
-                }
-                if (s.score > best_score)
-                {
-                    best_score = s.score;
-                    best_seen = {s};
-                }
-                else if (s.score == best_score && s.path.size() < best_seen[0].path.size())
-                {
-                    best_seen = {s};
                 }
             }
 
@@ -904,13 +877,24 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
         } // end depth loop
 
         // Update global best across all depth limits
-        if (best_score > global_best.score ||
-            (best_score == global_best.score && best_seen[0].path.size() < global_best.path.size()))
+        if (!beam.empty())
         {
-            global_best = best_seen[0];
+            const CropState &best_in_run = *max_element(beam.begin(), beam.end(),
+                                                        [&](const CropState &a, const CropState &b)
+                                                        {
+                                                            if (a.score != b.score)
+                                                                return a.score < b.score;
+                                                            return a.path.size() > b.path.size(); // prefer shorter
+                                                        });
+            if (best_in_run.score > global_best.score ||
+                (best_in_run.score == global_best.score &&
+                 best_in_run.path.size() < global_best.path.size()))
+            {
+                global_best = best_in_run;
+            }
+            cout << "[DoBeam] Depth limit " << depth_limit
+                 << " finished. Best score: " << best_in_run.score << "\n";
         }
-        cout << "[DoBeam] Depth limit " << depth_limit
-             << " finished. Best score: " << best_score << "\n";
     } // end iterative deepening
 
     // No solution found – return the best path from all runs
@@ -921,6 +905,7 @@ vector<Rotation> Do_step_beam_search(const vector<vector<uint16_t>> &crop,
         global_path.emplace_back(rot.k, rot.i + cnt, rot.j + cnt);
     return global_path;
 }
+
 pair<vector<vector<uint16_t>>, vector<Rotation>>
 STEP_Do(int Fsize, vector<vector<uint16_t>> grid, int mode, GPUBeamSearch &gpu_search)
 {
